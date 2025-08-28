@@ -1,7 +1,5 @@
 ---
 user:
-  name: "{{ ansible_user }}"
-  home: "/home/{{ ansible_user }}"
   shell: /usr/bin/zsh
   
 git:
@@ -144,7 +142,6 @@ vscode_extensions:
   - redhat.vscode-yaml
   - rooveterinaryinc.roo-cline
   - scala-lang.scala
-  - stkb.rewrap
   - twxs.cmake
   - unifiedjs.vscode-mdx
   - zainchen.json
