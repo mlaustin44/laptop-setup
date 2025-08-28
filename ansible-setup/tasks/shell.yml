@@ -1,0 +1,59 @@
+---
+# Setup zsh and oh-my-zsh
+- name: Set zsh as default shell
+  become: yes
+  user:
+    name: "{{ target_user }}"
+    shell: "{{ user.shell }}"
+
+- name: Download oh-my-zsh installer
+  get_url:
+    url: https://raw.githubusercontent.com/ohmyzsh/ohmyzsh/master/tools/install.sh
+    dest: /tmp/install-oh-my-zsh.sh
+    mode: '0755'
+
+- name: Install oh-my-zsh
+  shell: /tmp/install-oh-my-zsh.sh --unattended
+  args:
+    creates: "{{ target_home }}/.oh-my-zsh"
+
+- name: Configure .zshrc
+  template:
+    src: zshrc.j2
+    dest: "{{ target_home }}/.zshrc"
+    backup: yes
+
+- name: Install fzf key bindings
+  lineinfile:
+    path: "{{ target_home }}/.zshrc"
+    line: "source /usr/share/doc/fzf/examples/key-bindings.zsh"
+    insertafter: "source \\$ZSH/oh-my-zsh.sh"
+
+# Setup git configuration
+- name: Configure git user name
+  git_config:
+    name: user.name
+    value: "{{ git.name }}"
+    scope: global
+
+- name: Configure git editor
+  git_config:
+    name: core.editor
+    value: "{{ git.editor }}"
+    scope: global
+
+- name: Configure git to automatically create remote branches on push
+  git_config:
+    name: push.autoSetupRemote
+    value: "true"
+    scope: global
+
+- name: Configure git to use main as default branch
+  git_config:
+    name: init.defaultBranch
+    value: "main"
+    scope: global
+
+- name: Setup git LFS (if available)
+  shell: git lfs install
+  ignore_errors: yes

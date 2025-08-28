@@ -1,0 +1,77 @@
+---
+# Install manually downloaded binaries that are in /usr/local/bin
+- name: Create /usr/local/bin directory
+  become: yes
+  file:
+    path: /usr/local/bin
+    state: directory
+    mode: '0755'
+
+- name: Download and install AWS CLI v2
+  become: yes
+  shell: |
+    cd /tmp
+    curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip"
+    unzip awscliv2.zip
+    ./aws/install --update
+  args:
+    creates: /usr/local/bin/aws
+
+- name: Download and install Temporal CLI
+  become: yes
+  shell: |
+    cd /tmp
+    curl -sSf https://temporal.download/cli.sh | sh
+    mv /root/.temporalio/bin/temporal /usr/local/bin/ || mv ~/.temporalio/bin/temporal /usr/local/bin/
+    chmod +x /usr/local/bin/temporal
+  args:
+    creates: /usr/local/bin/temporal
+
+- name: Download and install kubectx/kubens
+  become: yes
+  git:
+    repo: https://github.com/ahmetb/kubectx
+    dest: /opt/kubectx
+
+- name: Link kubectx and kubens
+  become: yes
+  file:
+    src: "/opt/kubectx/{{ item }}"
+    dest: "/usr/local/bin/{{ item }}"
+    state: link
+  loop:
+    - kubectx
+    - kubens
+
+- name: Download and install ZAP (OWASP Zed Attack Proxy)
+  become: yes
+  shell: |
+    cd /tmp
+    wget https://github.com/zaproxy/zaproxy/releases/latest/download/ZAP_2_16_1_Linux.tar.gz
+    tar -xzf ZAP_2_16_1_Linux.tar.gz -C /opt/
+    mv /opt/ZAP_2_16_1 /opt/zaproxy
+    chmod +x /opt/zaproxy/zap.sh
+    ln -sf /opt/zaproxy/zap.sh /usr/local/bin/zap.sh
+  args:
+    creates: /opt/zaproxy/zap.sh
+
+- name: Install Claude Code CLI via npm
+  become: true
+  become_user: "{{ target_user }}"
+  shell: |
+    bash -c 'source {{ target_home }}/.nvm/nvm.sh && nvm use {{ versions.node_version }} && npm install -g @anthropic-ai/claude-code'
+  environment:
+    NVM_DIR: "{{ target_home }}/.nvm"
+  args:
+    executable: /bin/bash
+    creates: "{{ target_home }}/.nvm/versions/node/v{{ versions.node_version }}.*/lib/node_modules/@anthropic-ai/claude-code"
+
+- name: Download and install ProtonVPN Desktop App
+  become: yes
+  shell: |
+    cd /tmp
+    wget -O protonvpn-stable-release.deb https://repo.protonvpn.com/debian/dists/stable/main/binary-all/protonvpn-stable-release_1.0.8_all.deb
+    dpkg -i protonvpn-stable-release.deb && apt update
+    apt install -y proton-vpn-gnome-desktop libayatana-appindicator3-1 gir1.2-ayatanaappindicator3-0.1 gnome-shell-extension-appindicator
+  args:
+    creates: /usr/bin/proton-vpn

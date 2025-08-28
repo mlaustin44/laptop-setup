@@ -1,0 +1,56 @@
+---
+# Deploy VSCode settings
+- name: Create VSCode config directory
+  file:
+    path: "{{ target_home }}/.config/Code/User"
+    state: directory
+    recurse: yes
+
+- name: Deploy VSCode settings
+  template:
+    src: vscode-settings.json.j2
+    dest: "{{ target_home }}/.config/Code/User/settings.json"
+    backup: yes
+
+# Create common development directories
+- name: Create development directories
+  file:
+    path: "{{ target_home }}/{{ item }}"
+    state: directory
+  loop:
+    - repos
+    - Projects
+    - workspace
+    - .local/bin
+
+# Setup basic vim configuration
+- name: Create basic .vimrc
+  copy:
+    content: |
+      set number
+      set tabstop=4
+      set shiftwidth=4
+      set expandtab
+      set autoindent
+      set hlsearch
+      set incsearch
+      syntax on
+      set background=dark
+    dest: "{{ target_home }}/.vimrc"
+
+# Setup basic profile
+- name: Create .profile
+  copy:
+    content: |
+      # ~/.profile: executed by the command interpreter for login shells.
+      if [ -n "$BASH_VERSION" ]; then
+          if [ -f "$HOME/.bashrc" ]; then
+              . "$HOME/.bashrc"
+          fi
+      fi
+      
+      # User private bin directory
+      if [ -d "$HOME/.local/bin" ] ; then
+          PATH="$HOME/.local/bin:$PATH"
+      fi
+    dest: "{{ target_home }}/.profile"

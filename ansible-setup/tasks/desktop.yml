@@ -1,0 +1,42 @@
+---
+# Configure GNOME desktop settings
+- name: Set clock format to 24h
+  dconf:
+    key: "/org/gnome/desktop/interface/clock-format"
+    value: "'24h'"
+
+- name: Configure keyboard layouts
+  dconf:
+    key: "/org/gnome/desktop/input-sources/sources"
+    value: "[('xkb', 'us'), ('xkb', 'us+alt-intl')]"
+
+- name: Set compose key
+  dconf:
+    key: "/org/gnome/desktop/input-sources/xkb-options"
+    value: "['compose:ralt']"
+
+- name: Disable automatic timezone
+  dconf:
+    key: "/org/gnome/desktop/datetime/automatic-timezone"
+    value: "false"
+
+- name: Install GNOME tweaks
+  become: yes
+  apt:
+    name:
+      - gnome-tweaks
+      - gnome-shell-extensions
+      - chrome-gnome-shell
+    state: present
+
+# Setup basic GNOME preferences
+- name: Enable hot corner
+  dconf:
+    key: "/org/gnome/desktop/interface/enable-hot-corners"
+    value: "true"
+
+- name: Set dark theme preference (optional)
+  dconf:
+    key: "/org/gnome/desktop/interface/gtk-theme"
+    value: "'Adwaita-dark'"
+  ignore_errors: yes

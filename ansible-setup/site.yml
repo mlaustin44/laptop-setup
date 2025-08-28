@@ -1,0 +1,45 @@
+---
+- name: Configure Development Laptop
+  hosts: localhost
+  connection: local
+  become: yes
+  vars:
+    target_user: "ubuntu"
+    target_home: "/home/ubuntu"
+    
+  tasks:
+    - name: Update apt cache
+      apt:
+        update_cache: yes
+        cache_valid_time: 3600
+
+    - name: Install system packages
+      include_tasks: tasks/system-packages.yml
+
+    - name: Setup development environments
+      include_tasks: tasks/development.yml
+
+    - name: Install Python packages
+      include_tasks: tasks/python-packages.yml
+
+    - name: Install manual binaries
+      include_tasks: tasks/manual-binaries.yml
+
+    - name: Install applications
+      include_tasks: tasks/applications.yml
+
+    - name: Configure shell environment  
+      include_tasks: tasks/shell.yml
+
+    - name: Deploy configuration files
+      include_tasks: tasks/dotfiles.yml
+
+    - name: Configure desktop environment
+      include_tasks: tasks/desktop.yml
+
+  handlers:
+    - name: restart docker
+      systemd:
+        name: docker
+        state: restarted
+        daemon_reload: yes

@@ -1,0 +1,61 @@
+---
+# Install Flatpak
+- name: Install flatpak
+  become: yes
+  apt:
+    name: flatpak
+    state: present
+
+- name: Add Flathub repository for user
+  become: true
+  become_user: "{{ target_user }}"
+  flatpak_remote:
+    name: flathub
+    state: present
+    flatpakrepo_url: https://flathub.org/repo/flathub.flatpakrepo
+    method: user
+
+# - name: Install Flatpak applications
+#   become: true
+#   become_user: "{{ target_user }}"
+#   flatpak:
+#     name: "{{ item }}"
+#     state: present
+#     remote: flathub
+#     method: user
+#   loop: "{{ flatpak_apps }}"
+#   ignore_errors: yes
+
+# Install VSCode
+- name: Add Microsoft repository key and repo
+  become: yes
+  shell: |
+    curl -fsSL https://packages.microsoft.com/keys/microsoft.asc | sudo gpg --dearmor -o /usr/share/keyrings/microsoft-keyring.gpg
+    echo "deb [arch=amd64,arm64,armhf signed-by=/usr/share/keyrings/microsoft-keyring.gpg] https://packages.microsoft.com/repos/code stable main" | sudo tee /etc/apt/sources.list.d/vscode.list > /dev/null
+  args:
+    creates: /etc/apt/sources.list.d/vscode.list
+
+- name: Install VSCode
+  become: yes
+  apt:
+    name: code
+    state: present
+    update_cache: yes
+
+- name: Install VSCode extensions
+  become_user: "{{ target_user }}"
+  shell: code --install-extension "{{ item }}"
+  loop: "{{ vscode_extensions }}"
+  ignore_errors: yes
+
+# Install other useful applications not covered by additional_packages
+- name: Install remaining GUI applications
+  become: yes
+  apt:
+    name:
+      - firefox
+      - libreoffice
+      - qbittorrent
+      - remmina
+      - wireshark
+    state: present

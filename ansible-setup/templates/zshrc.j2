@@ -1,0 +1,48 @@
+export ZSH="$HOME/.oh-my-zsh"
+
+ZSH_THEME="{{ zsh.theme }}"
+plugins=({{ zsh.plugins | join(' ') }})
+
+source $ZSH/oh-my-zsh.sh
+
+# fzf integration
+source /usr/share/doc/fzf/examples/key-bindings.zsh
+source /usr/share/doc/fzf/examples/completion.zsh
+
+# Development environment paths
+export NVM_DIR="$HOME/.nvm"
+[ -s "$NVM_DIR/nvm.sh" ] && \. "$NVM_DIR/nvm.sh"
+[ -s "$NVM_DIR/bash_completion" ] && \. "$NVM_DIR/bash_completion"
+
+export PATH=$PATH:/usr/local/go/bin
+export PATH="$PATH:{{ user.home }}/.local/share/coursier/bin"
+export PATH=$PATH:{{ user.home }}/zig
+
+# Rust environment
+. "$HOME/.cargo/env"
+
+# Python environment (pyenv)
+export PYENV_ROOT="$HOME/.pyenv"
+[[ -d $PYENV_ROOT/bin ]] && export PATH="$PYENV_ROOT/bin:$PATH"
+eval "$(pyenv init - zsh)"
+
+export PATH="$PATH:{{ user.home }}/.local/bin"
+
+# Custom aliases (customize these as needed)
+alias ll='ls -la'
+alias la='ls -la'
+alias l='ls -CF'
+alias ..='cd ..'
+alias ...='cd ../..'
+
+# Docker aliases
+alias dps='docker ps'
+alias dim='docker images'
+alias dex='docker exec -it'
+
+# Git aliases
+alias gs='git status'
+alias ga='git add'
+alias gc='git commit'
+alias gp='git push'
+alias gl='git log --oneline'

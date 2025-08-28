@@ -1,0 +1,110 @@
+---
+# Install Python packages based on actual usage patterns
+- name: Install common Python versions with pyenv
+  shell: |
+    export PYENV_ROOT="{{ target_home }}/.pyenv"
+    export PATH="$PYENV_ROOT/bin:$PATH"
+    eval "$(pyenv init -)"
+    pyenv install {{ item }} --skip-existing
+  loop: "{{ versions.python_versions }}"
+  ignore_errors: yes
+
+- name: Set global Python version
+  shell: |
+    export PYENV_ROOT="{{ target_home }}/.pyenv"
+    export PATH="$PYENV_ROOT/bin:$PATH"
+    eval "$(pyenv init -)"
+    pyenv global {{ versions.python_versions[-1] }}
+
+- name: Install uv (fast Python package manager)
+  shell: curl -LsSf https://astral.sh/uv/install.sh | sh
+  args:
+    creates: "{{ target_home }}/.cargo/bin/uv"
+
+- name: Install pipx for Python package management
+  apt:
+    name: 
+      - python3-pip
+      - python3-venv
+      - python3-full
+      - pipx
+    state: present
+  become: true
+
+- name: Ensure pipx path is in environment
+  shell: pipx ensurepath
+  become: false
+
+- name: Install Python development tools with pipx
+  shell: |
+    pipx install {{ item }}
+  loop:
+    - black
+    - ruff
+    - mypy
+    - pre-commit
+    - poetry
+  ignore_errors: yes
+  become: false
+
+- name: Create a global requirements file for common packages
+  copy:
+    content: |
+      # Core development tools
+      pip
+      setuptools
+      wheel
+      build
+      virtualenv
+      
+      # Testing
+      pytest
+      pytest-mock
+      pytest-asyncio
+      pytest-django
+      pytest-cov
+      pytest-xdist
+      
+      # Django ecosystem
+      django>=5.1.0
+      djangorestframework
+      django-cors-headers
+      django-filter
+      celery
+      redis
+      channels
+      daphne
+      
+      # AI/ML
+      openai
+      anthropic
+      langchain
+      litellm
+      instructor
+      
+      # Data science
+      numpy
+      pandas
+      
+      # Web frameworks
+      fastapi
+      flask
+      
+      # Utilities
+      httpx
+      requests
+      click
+      pydantic
+      python-dotenv
+      typer
+      rich
+      tqdm
+      
+      # Temporal
+      temporalio
+      
+      # Database
+      psycopg2-binary
+      pgvector
+    dest: "{{ target_home }}/.python-global-requirements.txt"
+  become: false

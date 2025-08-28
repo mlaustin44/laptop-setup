@@ -1,0 +1,136 @@
+---
+- name: Install system packages
+  apt:
+    name: "{{ system_packages }}"
+    state: present
+
+- name: Install development packages
+  apt:
+    name: "{{ development_packages }}"
+    state: present
+
+- name: Add Google Chrome repository key and repo
+  shell: |
+    curl -fsSL https://dl.google.com/linux/linux_signing_key.pub | sudo gpg --dearmor -o /usr/share/keyrings/google-chrome-keyring.gpg
+    echo "deb [arch=amd64 signed-by=/usr/share/keyrings/google-chrome-keyring.gpg] http://dl.google.com/linux/chrome/deb/ stable main" | sudo tee /etc/apt/sources.list.d/google-chrome.list > /dev/null
+  args:
+    creates: /etc/apt/sources.list.d/google-chrome.list
+
+- name: Add Tailscale repository
+  shell: |
+    curl -fsSL https://pkgs.tailscale.com/stable/ubuntu/jammy.noarmor.gpg | sudo tee /usr/share/keyrings/tailscale-archive-keyring.gpg > /dev/null
+    echo "deb [signed-by=/usr/share/keyrings/tailscale-archive-keyring.gpg] https://pkgs.tailscale.com/stable/ubuntu jammy main" | sudo tee /etc/apt/sources.list.d/tailscale.list
+  args:
+    creates: /etc/apt/sources.list.d/tailscale.list
+
+- name: Enable 32-bit architecture for Steam
+  shell: dpkg --add-architecture i386
+  ignore_errors: yes
+
+- name: Update apt cache after adding i386 architecture
+  apt:
+    update_cache: yes
+
+- name: Add Steam repository key and repo
+  shell: |
+    curl -fsSL https://repo.steampowered.com/steam/archive/stable/steam.gpg | sudo gpg --dearmor -o /usr/share/keyrings/steam-keyring.gpg
+    echo "deb [arch=amd64,i386 signed-by=/usr/share/keyrings/steam-keyring.gpg] https://repo.steampowered.com/steam/ stable steam" | sudo tee /etc/apt/sources.list.d/steam.list > /dev/null
+  args:
+    creates: /etc/apt/sources.list.d/steam.list
+
+- name: Add Slack repository key and repo
+  shell: |
+    curl -fsSL https://packagecloud.io/slacktechnologies/slack/gpgkey | sudo gpg --dearmor -o /usr/share/keyrings/slack-keyring.gpg
+    echo "deb [signed-by=/usr/share/keyrings/slack-keyring.gpg] https://packagecloud.io/slacktechnologies/slack/debian/ jessie main" | sudo tee /etc/apt/sources.list.d/slack.list > /dev/null
+  args:
+    creates: /etc/apt/sources.list.d/slack.list
+
+- name: Add Typora repository key and repo
+  shell: |
+    curl -fsSL https://typoraio.cn/linux/public-key.asc | sudo gpg --dearmor -o /usr/share/keyrings/typora-keyring.gpg
+    echo "deb [signed-by=/usr/share/keyrings/typora-keyring.gpg] https://typora.io/linux ./" | sudo tee /etc/apt/sources.list.d/typora.list > /dev/null
+  args:
+    creates: /etc/apt/sources.list.d/typora.list
+
+- name: Remove problematic repository files if they exist
+  file:
+    path: "{{ item }}"
+    state: absent
+  loop:
+    - /etc/apt/sources.list.d/kicad.list
+    - /etc/apt/sources.list.d/obs.list
+    - /usr/share/keyrings/kicad-keyring.gpg
+    - /usr/share/keyrings/obs-keyring.gpg
+  ignore_errors: yes
+
+- name: Update apt cache after adding repositories
+  apt:
+    update_cache: yes
+
+- name: Install additional packages
+  apt:
+    name: "{{ additional_packages }}"
+    state: present
+
+- name: Install Google Chrome
+  apt:
+    name: google-chrome-stable
+    state: present
+
+- name: Add Docker repository key and repo
+  shell: |
+    curl -fsSL https://download.docker.com/linux/ubuntu/gpg | sudo gpg --dearmor -o /usr/share/keyrings/docker-keyring.gpg
+    echo "deb [arch=amd64 signed-by=/usr/share/keyrings/docker-keyring.gpg] https://download.docker.com/linux/ubuntu {{ ansible_distribution_release }} stable" | sudo tee /etc/apt/sources.list.d/docker.list > /dev/null
+  args:
+    creates: /etc/apt/sources.list.d/docker.list
+
+- name: Install Docker packages
+  apt:
+    name: "{{ docker_packages }}"
+    state: present
+    update_cache: yes
+  notify: restart docker
+
+- name: Add user to docker group
+  user:
+    name: "{{ target_user }}"
+    groups: docker
+    append: yes
+
+- name: Download kubectl
+  get_url:
+    url: "https://dl.k8s.io/release/stable.txt"
+    dest: /tmp/kubectl-version.txt
+
+- name: Get kubectl version
+  slurp:
+    src: /tmp/kubectl-version.txt
+  register: kubectl_version
+
+- name: Download and install kubectl
+  get_url:
+    url: "https://dl.k8s.io/release/{{ (kubectl_version.content | b64decode).strip() }}/bin/linux/amd64/kubectl"
+    dest: /usr/local/bin/kubectl
+    mode: '0755'
+
+- name: Download and install k9s
+  unarchive:
+    src: https://github.com/derailed/k9s/releases/latest/download/k9s_Linux_amd64.tar.gz
+    dest: /usr/local/bin
+    remote_src: yes
+    creates: /usr/local/bin/k9s
+    mode: '0755'
+
+- name: Download and install helm
+  unarchive:
+    src: https://get.helm.sh/helm-v3.12.0-linux-amd64.tar.gz
+    dest: /tmp
+    remote_src: yes
+    creates: /tmp/linux-amd64/helm
+
+- name: Install helm binary
+  copy:
+    src: /tmp/linux-amd64/helm
+    dest: /usr/local/bin/helm
+    mode: '0755'
+    remote_src: yes
