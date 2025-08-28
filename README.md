@@ -1,10 +1,10 @@
 # laptop-configs
 
-Ansible playbooks for Ubuntu 25.04 development environment setup.
+Ansible playbooks for Ubuntu/pop_os development environment setup.
 
 ## Prerequisites
 
-- Ubuntu 25.04+ installation
+- Ubuntu or ubuntu based installation
 - Internet connection  
 - User account with sudo privileges
 - Git and Ansible: `sudo apt update && sudo apt install git ansible`
@@ -47,11 +47,15 @@ The repository includes a test script for validating the playbook in a virtual m
 ```
 
 The script uses multipass to create an Ubuntu VM for testing. Commands:
-- `fresh` - Create new VM and run playbook
-- `ansible` - Run playbook on existing VM
+- `fresh` - Create new VM, run playbook, and create snapshot (after base setup, before copying ansible files) for fast retesting
+- `fast` - Restore from snapshot and run playbook (requires previous `fresh` run)
+- `ansible` - Run playbook on existing VM without restoring (but does overwrite files)
 - `verify` - Check installation status
 - `connect` - SSH into VM
-- `cleanup` - Delete VM
+- `snapshot` - Create snapshot of current VM state
+- `cleanup` - Delete VM and all snapshots
+
+The `fresh` command automatically creates a snapshot after initial VM setup, before running Ansible. Subsequent tests can use `fast` to restore from this clean snapshot, avoiding the need to recreate the VM and reinstall base packages.
 
 ## Manual VM Testing
 
