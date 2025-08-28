@@ -15,8 +15,8 @@ export NVM_DIR="$HOME/.nvm"
 [ -s "$NVM_DIR/bash_completion" ] && \. "$NVM_DIR/bash_completion"
 
 export PATH=$PATH:/usr/local/go/bin
-export PATH="$PATH:{{ user.home }}/.local/share/coursier/bin"
-export PATH=$PATH:{{ user.home }}/zig
+export PATH="$PATH:$HOME/.local/share/coursier/bin"
+export PATH=$PATH:$HOME/zig
 
 # Rust environment
 . "$HOME/.cargo/env"
@@ -26,7 +26,7 @@ export PYENV_ROOT="$HOME/.pyenv"
 [[ -d $PYENV_ROOT/bin ]] && export PATH="$PYENV_ROOT/bin:$PATH"
 eval "$(pyenv init - zsh)"
 
-export PATH="$PATH:{{ user.home }}/.local/bin"
+export PATH="$PATH:$HOME/.local/bin"
 
 # Custom aliases (customize these as needed)
 alias ll='ls -la'

@@ -15,16 +15,16 @@
     flatpakrepo_url: https://flathub.org/repo/flathub.flatpakrepo
     method: user
 
-# - name: Install Flatpak applications
-#   become: true
-#   become_user: "{{ target_user }}"
-#   flatpak:
-#     name: "{{ item }}"
-#     state: present
-#     remote: flathub
-#     method: user
-#   loop: "{{ flatpak_apps }}"
-#   ignore_errors: yes
+- name: Install Flatpak applications
+  become: true
+  become_user: "{{ target_user }}"
+  flatpak:
+    name: "{{ item }}"
+    state: present
+    remote: flathub
+    method: user
+  loop: "{{ flatpak_apps }}"
+  ignore_errors: yes
 
 # Install VSCode
 - name: Remove conflicting Microsoft repository configurations
