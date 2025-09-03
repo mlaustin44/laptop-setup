@@ -1,0 +1,92 @@
+---
+# Task 11: Optional Applications (Native packages strongly preferred)
+
+# Note: On Arch Linux, native packages from official repos and AUR are preferred
+# This task only handles edge cases and provides Flatpak as last resort
+
+- name: Install any remaining AUR applications
+  become: no
+  become_user: "{{ target_user }}"
+  command: paru -S --noconfirm --needed {{ item }}
+  loop:
+    # Additional tools that might have been missed
+    - bitwarden-cli
+    - 1password-cli
+    - session-desktop-bin
+    - joplin-appimage
+  register: final_aur_install
+  failed_when: false
+  changed_when: "'Nothing to do' not in final_aur_install.stdout"
+  ignore_errors: yes
+
+# Flatpak - only if explicitly requested and for apps not available natively
+- name: Flatpak setup (only if explicitly enabled)
+  block:
+    - name: Install Flatpak runtime
+      pacman:
+        name:
+          - flatpak
+        state: present
+
+    - name: Add Flathub repository
+      flatpak_remote:
+        name: flathub
+        state: present
+        flatpakrepo_url: https://flathub.org/repo/flathub.flatpakrepo
+
+    - name: Information about Flatpak
+      debug:
+        msg: |
+          ============================================================
+          Flatpak is installed but should rarely be needed on Arch.
+          
+          Use Flatpak ONLY for:
+          1. Proprietary apps not in AUR
+          2. When you specifically need sandboxing
+          3. Apps that have broken AUR packages
+          
+          Otherwise, always prefer:
+          - Official repos: pacman -S <package>
+          - AUR: paru -S <package>
+          ============================================================
+  when: install_flatpak | default(false)
+
+- name: Create helper script for finding packages
+  copy:
+    content: |
+      #!/bin/bash
+      # Package finder - searches all sources
+      
+      PACKAGE="$1"
+      
+      if [ -z "$PACKAGE" ]; then
+          echo "Usage: $0 <package-name>"
+          echo "Searches official repos, AUR, and optionally Flatpak"
+          exit 1
+      fi
+      
+      echo "🔍 Searching for: $PACKAGE"
+      echo
+      
+      echo "📦 Official Repositories:"
+      pacman -Ss "$PACKAGE" 2>/dev/null | head -10 || echo "  Not found"
+      echo
+      
+      echo "📦 AUR:"
+      paru -Ss "$PACKAGE" 2>/dev/null | grep "^aur/" | head -10 || echo "  Not found"
+      echo
+      
+      if command -v flatpak &>/dev/null; then
+          echo "📦 Flatpak:"
+          flatpak search "$PACKAGE" 2>/dev/null | head -10 || echo "  Not found"
+      fi
+      
+      echo
+      echo "💡 Install with:"
+      echo "  Official: sudo pacman -S <exact-name>"
+      echo "  AUR:      paru -S <exact-name>"
+      [ -x "$(command -v flatpak)" ] && echo "  Flatpak:  flatpak install <app-id>"
+    dest: "/home/{{ target_user }}/.local/bin/find-package"
+    owner: "{{ target_user }}"
+    group: "{{ target_user }}"
+    mode: '0755'

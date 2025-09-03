@@ -1,0 +1,188 @@
+---
+# Task 02: Hardware Configuration (UM5606 specific)
+
+- name: Install hardware-specific packages
+  pacman:
+    name:
+      - mesa
+      - vulkan-radeon
+      - libva-mesa-driver
+      - mesa-vdpau
+      - xf86-video-amdgpu
+      - amd-ucode
+      - acpi
+      - acpid
+      - lm_sensors
+      - tpm2-tss
+      - tpm2-tools
+      - fwupd
+    state: present
+
+- name: Configure TPM2 for LUKS auto-unlock
+  block:
+    - name: Check if LUKS device exists
+      stat:
+        path: "{{ luks_device }}"
+      register: luks_check
+      when: enable_luks_tpm2
+
+    - name: Enroll TPM2 for LUKS
+      command: systemd-cryptenroll --tpm2-device=auto {{ luks_device }}
+      when: 
+        - enable_luks_tpm2
+        - luks_check.stat.exists
+        - not vm_mode
+      ignore_errors: yes
+
+    - name: Configure crypttab for TPM2
+      lineinfile:
+        path: /etc/crypttab.initramfs
+        regexp: '^cryptroot'
+        line: "cryptroot UUID={{ ansible_facts['devices'][luks_device]['links']['uuids'][0] | default('PLACEHOLDER') }} none tpm2-device=auto"
+        create: yes
+      when:
+        - enable_luks_tpm2
+        - not vm_mode
+      ignore_errors: yes
+
+- name: Configure mkinitcpio for hardware
+  lineinfile:
+    path: /etc/mkinitcpio.conf
+    regexp: '^MODULES='
+    line: 'MODULES=(amdgpu)'
+  notify: regenerate initramfs
+  when: hardware_model == "UM5606"
+
+- name: Add TPM2 to mkinitcpio hooks
+  lineinfile:
+    path: /etc/mkinitcpio.conf
+    regexp: '^HOOKS='
+    line: 'HOOKS=(base systemd autodetect modconf kms keyboard sd-vconsole block sd-encrypt filesystems fsck)'
+  notify: regenerate initramfs
+  when: 
+    - enable_luks_tpm2
+    - not vm_mode
+
+- name: Configure BTRFS mount options in fstab
+  mount:
+    path: "{{ item }}"
+    src: LABEL=ROOT
+    fstype: btrfs
+    opts: "subvol={{ item }},noatime,compress=zstd:1,space_cache=v2,autodefrag"
+    state: present
+  loop:
+    - /
+    - /home
+    - /var
+    - /var/log
+    - /.snapshots
+  when: not vm_mode
+  ignore_errors: yes
+
+- name: Create swap file for hibernation
+  block:
+    - name: Create swap directory
+      file:
+        path: /swap
+        state: directory
+        mode: '0755'
+
+    - name: Create swap file
+      command: |
+        truncate -s 0 /swap/swapfile
+        chattr +C /swap/swapfile
+        fallocate -l {{ swap_size }} /swap/swapfile
+        chmod 600 /swap/swapfile
+        mkswap /swap/swapfile
+      args:
+        creates: /swap/swapfile
+      when: enable_hibernation
+
+    - name: Enable swap
+      command: swapon /swap/swapfile
+      when: enable_hibernation
+      ignore_errors: yes
+
+    - name: Add swap to fstab
+      mount:
+        path: none
+        src: /swap/swapfile
+        fstype: swap
+        opts: defaults
+        state: present
+      when: enable_hibernation
+
+- name: Configure hibernation
+  block:
+    - name: Get swap file offset
+      shell: filefrag -v /swap/swapfile | awk '$1=="0:" {print substr($4, 1, length($4)-2)}'
+      register: swap_offset
+      when: enable_hibernation
+      ignore_errors: yes
+
+    - name: Configure systemd sleep for hibernation
+      copy:
+        content: |
+          [Sleep]
+          AllowSuspend=yes
+          AllowHibernation=yes
+          AllowSuspendThenHibernate=yes
+          HibernateDelaySec=1800
+        dest: /etc/systemd/sleep.conf
+      when: enable_hibernation
+
+    - name: Add resume parameters to kernel cmdline
+      lineinfile:
+        path: /etc/default/grub
+        regexp: '^GRUB_CMDLINE_LINUX_DEFAULT='
+        line: 'GRUB_CMDLINE_LINUX_DEFAULT="quiet splash {{ kernel_params }} resume=UUID={{ ansible_facts.devices[luks_device].links.uuids[0] | default("PLACEHOLDER") }} resume_offset={{ swap_offset.stdout | default("0") }}"'
+      when: 
+        - enable_hibernation
+        - not vm_mode
+      ignore_errors: yes
+      notify: regenerate grub
+
+- name: Configure display for OLED protection
+  block:
+    - name: Create OLED pixel shift script
+      copy:
+        content: |
+          #!/bin/bash
+          # OLED burn-in protection script
+          while true; do
+            sleep 300  # Every 5 minutes
+            xrandr --output eDP-1 --pos 1x1
+            sleep 1
+            xrandr --output eDP-1 --pos 0x0
+          done
+        dest: /usr/local/bin/oled-protect
+        mode: '0755'
+      when: oled_display
+
+    - name: Create systemd service for OLED protection
+      copy:
+        content: |
+          [Unit]
+          Description=OLED Burn-in Protection
+          After=graphical.target
+          
+          [Service]
+          Type=simple
+          ExecStart=/usr/local/bin/oled-protect
+          Restart=always
+          User={{ target_user }}
+          Environment="DISPLAY=:0"
+          
+          [Install]
+          WantedBy=default.target
+        dest: /etc/systemd/system/oled-protect.service
+      when: oled_display
+
+- name: Install laptop specific tools
+  pacman:
+    name:
+      - brightnessctl
+      - light
+      - acpilight
+    state: present
+  when: laptop_mode

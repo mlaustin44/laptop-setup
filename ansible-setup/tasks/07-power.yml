@@ -1,0 +1,358 @@
+---
+# Task 07: Power Management and OLED Protection
+
+- name: Install power management packages
+  pacman:
+    name:
+      - tlp
+      - tlp-rdw
+      - powertop
+      - acpid
+      - thermald
+      - cpupower
+      - upower
+      - acpi_call
+      - laptop-mode-tools
+    state: present
+  when: laptop_mode
+
+- name: Install auto-cpufreq from AUR
+  become: no
+  become_user: "{{ target_user }}"
+  command: paru -S --noconfirm --needed auto-cpufreq
+  when: enable_auto_cpufreq and laptop_mode
+  register: auto_cpufreq_install
+  failed_when: false
+  changed_when: "'Nothing to do' not in auto_cpufreq_install.stdout"
+
+- name: Configure TLP
+  template:
+    src: tlp.conf.j2
+    dest: /etc/tlp.conf
+  when: enable_tlp and laptop_mode
+  notify: restart tlp
+
+- name: Configure logind for lid behavior
+  blockinfile:
+    path: /etc/systemd/logind.conf
+    marker: "# {mark} ANSIBLE MANAGED BLOCK"
+    block: |
+      HandleLidSwitch=suspend-then-hibernate
+      HandleLidSwitchDocked=ignore
+      HandleLidSwitchExternalPower=suspend-then-hibernate
+      IdleAction=suspend
+      IdleActionSec=30min
+  when: laptop_mode
+  notify: restart logind
+
+- name: Configure idle for OLED protection
+  block:
+    - name: Configure swayidle for OLED protection
+      copy:
+        content: |
+          # Swayidle configuration for OLED protection
+          timeout 60 'brightnessctl -s set 10%' resume 'brightnessctl -r'
+          timeout 300 'swaylock -f'
+          timeout 600 'swaymsg "output eDP-1 dpms off"' resume 'swaymsg "output eDP-1 dpms on"'
+          timeout 900 'cat /sys/class/power_supply/AC/online | grep -q 0 && systemctl suspend-then-hibernate'
+        dest: "/home/{{ target_user }}/.config/swayidle/config"
+        owner: "{{ target_user }}"
+        group: "{{ target_user }}"
+        mode: '0644'
+      when: install_sway
+
+    - name: Configure hypridle for OLED protection
+      copy:
+        content: |
+          general {
+              lock_cmd = hyprlock
+              before_sleep_cmd = loginctl lock-session
+              after_sleep_cmd = hyprctl dispatch dpms on
+          }
+          
+          # Dim screen
+          listener {
+              timeout = 60
+              on-timeout = brightnessctl -s set 10%
+              on-resume = brightnessctl -r
+          }
+          
+          # Lock screen
+          listener {
+              timeout = 300
+              on-timeout = loginctl lock-session
+          }
+          
+          # Screen off
+          listener {
+              timeout = 600
+              on-timeout = hyprctl dispatch dpms off
+              on-resume = hyprctl dispatch dpms on
+          }
+          
+          # Suspend
+          listener {
+              timeout = 900
+              on-timeout = systemctl suspend-then-hibernate
+          }
+        dest: "/home/{{ target_user }}/.config/hypr/hypridle.conf"
+        owner: "{{ target_user }}"
+        group: "{{ target_user }}"
+        mode: '0644'
+      when: install_hyprland
+
+    - name: Create wallpaper rotation script for OLED
+      copy:
+        content: |
+          #!/bin/bash
+          # Wallpaper rotation for OLED burn-in prevention
+          
+          WALLPAPER_DIR="$HOME/Pictures/Wallpapers"
+          INTERVAL=3600  # Rotate every hour
+          
+          # Ensure we have dark wallpapers for OLED
+          mkdir -p "$WALLPAPER_DIR"
+          
+          # Download some OLED-friendly wallpapers if none exist
+          if [ -z "$(ls -A $WALLPAPER_DIR 2>/dev/null)" ]; then
+            echo "Downloading OLED-friendly wallpapers..."
+            cd "$WALLPAPER_DIR"
+            # Add some default dark wallpapers
+            curl -sL -o oled1.jpg "https://wallpapercave.com/wp/wp3982541.jpg" 2>/dev/null || true
+            curl -sL -o oled2.jpg "https://wallpapercave.com/wp/wp4676576.jpg" 2>/dev/null || true
+          fi
+          
+          while true; do
+            # Get random wallpaper
+            WALLPAPER=$(find "$WALLPAPER_DIR" -type f \( -name "*.jpg" -o -name "*.png" \) | shuf -n 1)
+            
+            if [ -n "$WALLPAPER" ]; then
+              # Set for Sway
+              if pgrep -x sway > /dev/null; then
+                swaymsg output "*" bg "$WALLPAPER" fill
+              fi
+              
+              # Set for Hyprland
+              if pgrep -x Hyprland > /dev/null; then
+                hyprctl hyprpaper wallpaper "eDP-1,$WALLPAPER"
+              fi
+              
+              # Set for GNOME
+              if [ "$XDG_CURRENT_DESKTOP" = "GNOME" ]; then
+                gsettings set org.gnome.desktop.background picture-uri "file://$WALLPAPER"
+                gsettings set org.gnome.desktop.background picture-uri-dark "file://$WALLPAPER"
+              fi
+            fi
+            
+            sleep $INTERVAL
+          done
+        dest: "/home/{{ target_user }}/.local/bin/wallpaper-rotate"
+        owner: "{{ target_user }}"
+        group: "{{ target_user }}"
+        mode: '0755'
+
+    - name: Create systemd user service for wallpaper rotation
+      copy:
+        content: |
+          [Unit]
+          Description=Wallpaper rotation for OLED protection
+          After=graphical-session.target
+          
+          [Service]
+          Type=simple
+          ExecStart=%h/.local/bin/wallpaper-rotate
+          Restart=always
+          
+          [Install]
+          WantedBy=default.target
+        dest: "/home/{{ target_user }}/.config/systemd/user/wallpaper-rotate.service"
+        owner: "{{ target_user }}"
+        group: "{{ target_user }}"
+        mode: '0644'
+
+    - name: Enable wallpaper rotation service
+      systemd:
+        name: wallpaper-rotate
+        enabled: yes
+        scope: user
+      become: no
+      become_user: "{{ target_user }}"
+      when: not vm_mode
+  when: oled_display
+
+- name: Create power mode management scripts
+  copy:
+    content: |
+      #!/bin/bash
+      # Power mode management script
+      
+      MODES=("powersave" "balanced" "performance" "turbo")
+      CURRENT_MODE_FILE="/tmp/power_mode"
+      
+      get_current_mode() {
+          if [ -f "$CURRENT_MODE_FILE" ]; then
+              cat "$CURRENT_MODE_FILE"
+          else
+              echo "balanced"
+          fi
+      }
+      
+      set_mode() {
+          local mode=$1
+          
+          case $mode in
+              powersave)
+                  sudo cpupower frequency-set -g powersave
+                  sudo ryzenadj --tctl-temp=60 --stapm-limit=15000 --fast-limit=15000 --slow-limit=15000
+                  echo "powersave" > $CURRENT_MODE_FILE
+                  notify-send "Power Mode" "Switched to Power Save"
+                  ;;
+              balanced)
+                  sudo cpupower frequency-set -g schedutil
+                  sudo ryzenadj --tctl-temp=75 --stapm-limit=25000 --fast-limit=35000 --slow-limit=30000
+                  echo "balanced" > $CURRENT_MODE_FILE
+                  notify-send "Power Mode" "Switched to Balanced"
+                  ;;
+              performance)
+                  sudo cpupower frequency-set -g performance
+                  sudo ryzenadj --tctl-temp=85 --stapm-limit=35000 --fast-limit=45000 --slow-limit=40000
+                  echo "performance" > $CURRENT_MODE_FILE
+                  notify-send "Power Mode" "Switched to Performance"
+                  ;;
+              turbo)
+                  sudo cpupower frequency-set -g performance
+                  sudo ryzenadj --tctl-temp=95 --stapm-limit=45000 --fast-limit=65000 --slow-limit=54000
+                  echo "turbo" > $CURRENT_MODE_FILE
+                  notify-send "Power Mode" "Switched to Turbo"
+                  ;;
+              *)
+                  echo "Invalid mode: $mode"
+                  exit 1
+                  ;;
+          esac
+      }
+      
+      case "$1" in
+          get)
+              get_current_mode
+              ;;
+          set)
+              set_mode "$2"
+              ;;
+          next)
+              current=$(get_current_mode)
+              for i in "${!MODES[@]}"; do
+                  if [[ "${MODES[$i]}" = "$current" ]]; then
+                      next_index=$(( (i + 1) % ${#MODES[@]} ))
+                      set_mode "${MODES[$next_index]}"
+                      break
+                  fi
+              done
+              ;;
+          prev)
+              current=$(get_current_mode)
+              for i in "${!MODES[@]}"; do
+                  if [[ "${MODES[$i]}" = "$current" ]]; then
+                      prev_index=$(( (i - 1 + ${#MODES[@]}) % ${#MODES[@]} ))
+                      set_mode "${MODES[$prev_index]}"
+                      break
+                  fi
+              done
+              ;;
+          *)
+              echo "Usage: $0 {get|set|next|prev} [mode]"
+              exit 1
+              ;;
+      esac
+    dest: "/home/{{ target_user }}/.local/bin/power-mode"
+    owner: "{{ target_user }}"
+    group: "{{ target_user }}"
+    mode: '0755'
+  when: laptop_mode
+
+- name: Create power mode menu script
+  copy:
+    content: |
+      #!/bin/bash
+      # Power mode menu using rofi/wofi
+      
+      MODES="powersave\nbalanced\nperformance\nturbo"
+      
+      if command -v wofi &> /dev/null; then
+          CHOSEN=$(echo -e "$MODES" | wofi --dmenu --prompt "Power Mode:")
+      elif command -v rofi &> /dev/null; then
+          CHOSEN=$(echo -e "$MODES" | rofi -dmenu -p "Power Mode:")
+      else
+          echo "Neither wofi nor rofi found"
+          exit 1
+      fi
+      
+      if [ -n "$CHOSEN" ]; then
+          ~/.local/bin/power-mode set "$CHOSEN"
+      fi
+    dest: "/home/{{ target_user }}/.local/bin/power-mode-menu"
+    owner: "{{ target_user }}"
+    group: "{{ target_user }}"
+    mode: '0755'
+  when: laptop_mode
+
+- name: Install and configure ryzenadj for AMD power management
+  become: no
+  become_user: "{{ target_user }}"
+  command: paru -S --noconfirm --needed ryzenadj-git
+  when: hardware_model == "UM5606" and laptop_mode
+  register: ryzenadj_install
+  failed_when: false
+  changed_when: "'Nothing to do' not in ryzenadj_install.stdout"
+
+- name: Configure sudo for power management tools
+  copy:
+    content: |
+      # Allow power management without password
+      {{ target_user }} ALL=(ALL) NOPASSWD: /usr/bin/cpupower
+      {{ target_user }} ALL=(ALL) NOPASSWD: /usr/bin/ryzenadj
+      {{ target_user }} ALL=(ALL) NOPASSWD: /usr/bin/tlp
+      {{ target_user }} ALL=(ALL) NOPASSWD: /usr/bin/powertop
+    dest: /etc/sudoers.d/power-management
+    validate: 'visudo -cf %s'
+  when: laptop_mode
+
+- name: Enable power management services
+  systemd:
+    name: "{{ item }}"
+    enabled: yes
+    state: started
+  loop:
+    - tlp
+    - acpid
+  when: laptop_mode and enable_tlp
+
+- name: Disable conflicting power management services
+  systemd:
+    name: "{{ item }}"
+    enabled: no
+    state: stopped
+  loop:
+    - power-profiles-daemon
+  when: laptop_mode and enable_tlp
+  ignore_errors: yes
+
+- name: Enable auto-cpufreq service
+  systemd:
+    name: auto-cpufreq
+    enabled: yes
+    state: started
+  when: enable_auto_cpufreq and laptop_mode
+
+# Handlers
+- name: restart tlp handler
+  systemd:
+    name: tlp
+    state: restarted
+  listen: "restart tlp"
+
+- name: restart logind handler
+  systemd:
+    name: systemd-logind
+    state: restarted
+  listen: "restart logind"

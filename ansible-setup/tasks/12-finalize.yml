@@ -1,0 +1,283 @@
+---
+# Task 12: Final Configuration and Validation
+
+- name: Create system information script
+  copy:
+    content: |
+      #!/bin/bash
+      # System information display
+      
+      echo "================================"
+      echo "   System Information"
+      echo "================================"
+      echo
+      echo "OS: $(cat /etc/os-release | grep PRETTY_NAME | cut -d'"' -f2)"
+      echo "Kernel: $(uname -r)"
+      echo "Architecture: $(uname -m)"
+      echo "Hostname: $(hostname)"
+      echo "CPU: $(lscpu | grep 'Model name' | cut -d':' -f2 | xargs)"
+      echo "Memory: $(free -h | awk '/^Mem:/ {print $2}')"
+      echo "Disk: $(df -h / | awk 'NR==2 {print $2}')"
+      echo "GPU: $(lspci | grep -E 'VGA|3D' | cut -d':' -f3 | xargs)"
+      echo
+      echo "================================"
+      echo "   Desktop Environments"
+      echo "================================"
+      which gnome-shell &>/dev/null && echo "✓ GNOME $(gnome-shell --version)"
+      which sway &>/dev/null && echo "✓ Sway $(sway --version | grep sway)"
+      which Hyprland &>/dev/null && echo "✓ Hyprland"
+      echo
+      echo "================================"
+      echo "   Development Tools"
+      echo "================================"
+      which python &>/dev/null && echo "✓ Python $(python --version 2>&1)"
+      which node &>/dev/null && echo "✓ Node.js $(node --version)"
+      which rustc &>/dev/null && echo "✓ Rust $(rustc --version | cut -d' ' -f2)"
+      which go &>/dev/null && echo "✓ Go $(go version | cut -d' ' -f3)"
+      which docker &>/dev/null && echo "✓ Docker $(docker --version | cut -d' ' -f3 | cut -d',' -f1)"
+      echo
+      echo "================================"
+      echo "   System Services"
+      echo "================================"
+      systemctl is-active --quiet NetworkManager && echo "✓ NetworkManager" || echo "✗ NetworkManager"
+      systemctl is-active --quiet iwd && echo "✓ iwd" || echo "✗ iwd"
+      systemctl is-active --quiet bluetooth && echo "✓ Bluetooth" || echo "✗ Bluetooth"
+      systemctl is-active --quiet docker && echo "✓ Docker" || echo "✗ Docker"
+      systemctl is-active --quiet tlp && echo "✓ TLP" || echo "✗ TLP"
+      systemctl is-active --quiet tailscaled && echo "✓ Tailscale" || echo "✗ Tailscale"
+      systemctl is-active --quiet keyd && echo "✓ Keyd" || echo "✗ Keyd"
+    dest: "/home/{{ target_user }}/.local/bin/sysinfo"
+    owner: "{{ target_user }}"
+    group: "{{ target_user }}"
+    mode: '0755'
+
+- name: Verify critical packages installation
+  command: pacman -Q {{ item }}
+  loop:
+    - base-devel
+    - linux-headers
+    - git
+    - networkmanager
+    - pipewire
+    - sudo
+  register: package_check
+  failed_when: false
+  changed_when: false
+
+- name: Verify critical services
+  systemd:
+    name: "{{ item }}"
+    state: started
+    enabled: yes
+  loop:
+    - "{{ 'iwd' if use_iwd else 'NetworkManager' }}"
+    - systemd-resolved
+    - systemd-timesyncd
+  register: service_check
+  failed_when: false
+
+- name: Ensure user can sudo without issues
+  command: sudo -n true
+  become: no
+  become_user: "{{ target_user }}"
+  register: sudo_check
+  failed_when: false
+  changed_when: false
+
+- name: Create system backup script
+  copy:
+    content: |
+      #!/bin/bash
+      # System configuration backup script
+      
+      BACKUP_DIR="$HOME/backups/system-$(date +%Y%m%d-%H%M%S)"
+      mkdir -p "$BACKUP_DIR"
+      
+      echo "Creating system backup in $BACKUP_DIR..."
+      
+      # Backup package lists
+      echo "Backing up package lists..."
+      pacman -Qe > "$BACKUP_DIR/packages-explicit.txt"
+      pacman -Qm > "$BACKUP_DIR/packages-aur.txt"
+      pacman -Qq > "$BACKUP_DIR/packages-all.txt"
+      
+      # Backup important configs
+      echo "Backing up configurations..."
+      cp -r ~/.config "$BACKUP_DIR/config" 2>/dev/null
+      cp ~/.zshrc "$BACKUP_DIR/" 2>/dev/null
+      cp ~/.bashrc "$BACKUP_DIR/" 2>/dev/null
+      cp ~/.gitconfig "$BACKUP_DIR/" 2>/dev/null
+      cp -r ~/.ssh "$BACKUP_DIR/ssh" 2>/dev/null
+      
+      # Backup system configs (need sudo)
+      echo "Backing up system configurations..."
+      sudo cp -r /etc/keyd "$BACKUP_DIR/" 2>/dev/null
+      sudo cp /etc/tlp.conf "$BACKUP_DIR/" 2>/dev/null
+      sudo cp -r /etc/systemd/*.conf.d "$BACKUP_DIR/systemd-configs" 2>/dev/null
+      
+      # Create restore script
+      cat > "$BACKUP_DIR/restore.sh" << 'EOF'
+      #!/bin/bash
+      echo "This will restore packages and configurations."
+      echo "Review the lists before running commands."
+      echo
+      echo "To restore packages:"
+      echo "  sudo pacman -S --needed $(cat packages-explicit.txt)"
+      echo
+      echo "To restore AUR packages:"
+      echo "  paru -S --needed $(cat packages-aur.txt)"
+      echo
+      echo "Configuration files are in their respective directories."
+      EOF
+      chmod +x "$BACKUP_DIR/restore.sh"
+      
+      echo "Backup complete: $BACKUP_DIR"
+      echo "Run $BACKUP_DIR/restore.sh for restoration instructions"
+    dest: "/home/{{ target_user }}/.local/bin/backup-system"
+    owner: "{{ target_user }}"
+    group: "{{ target_user }}"
+    mode: '0755'
+
+- name: Create post-install checklist
+  copy:
+    content: |
+      ================================
+      Post-Installation Checklist
+      ================================
+      
+      □ System Updates
+        - [ ] Run full system update: sudo pacman -Syu
+        - [ ] Update AUR packages: paru -Sua
+        - [ ] Update firmware: sudo fwupdmgr refresh && sudo fwupdmgr update
+      
+      □ Hardware Configuration
+        - [ ] Test suspend/resume
+        - [ ] Test hibernate (if configured)
+        - [ ] Verify WiFi stability
+        - [ ] Test Bluetooth devices
+        - [ ] Check display brightness controls
+        - [ ] Test external display connection
+        - [ ] Verify audio output/input
+        - [ ] Test touchpad gestures
+      
+      □ Security
+        - [ ] Set up firewall rules: sudo ufw status
+        - [ ] Configure fail2ban (if needed)
+        - [ ] Set up backup encryption
+        - [ ] Review sudo permissions
+        - [ ] Enable LUKS TPM2 unlock (if applicable)
+      
+      □ Development Environment
+        - [ ] Configure Git SSH keys
+        - [ ] Set up Docker credentials
+        - [ ] Configure cloud CLI tools (AWS, GCP, Azure)
+        - [ ] Import IDE settings
+        - [ ] Clone essential repositories
+      
+      □ Personal Setup
+        - [ ] Import browser bookmarks
+        - [ ] Configure email clients
+        - [ ] Set up cloud storage sync
+        - [ ] Import password manager data
+        - [ ] Configure VPN connections
+        - [ ] Restore personal dotfiles
+      
+      □ Performance Tuning
+        - [ ] Run powertop --auto-tune
+        - [ ] Configure CPU governor
+        - [ ] Set up ZRAM if needed
+        - [ ] Optimize boot time
+        - [ ] Configure BTRFS maintenance
+      
+      □ Desktop Customization
+        - [ ] Set wallpapers
+        - [ ] Configure themes
+        - [ ] Set up keyboard shortcuts
+        - [ ] Configure panels/bars
+        - [ ] Set up workspaces
+      
+      ================================
+      Useful Commands
+      ================================
+      
+      System Info:        sysinfo
+      Update Everything:  update-all
+      Power Mode:         power-mode-menu
+      WiFi Control:       wifi-switch
+      VPN Control:        vpn-control
+      Backup System:      backup-system
+      Search Packages:    search-packages <name>
+      
+      ================================
+    dest: "/home/{{ target_user }}/post-install-checklist.md"
+    owner: "{{ target_user }}"
+    group: "{{ target_user }}"
+    mode: '0644'
+
+- name: Clean package cache
+  command: paccache -rk 2
+  ignore_errors: yes
+
+- name: Update font cache
+  command: fc-cache -fv
+  become: no
+  become_user: "{{ target_user }}"
+
+- name: Update desktop database
+  command: update-desktop-database
+  become: no
+  become_user: "{{ target_user }}"
+  ignore_errors: yes
+
+- name: Set correct permissions on user home
+  file:
+    path: "/home/{{ target_user }}"
+    owner: "{{ target_user }}"
+    group: "{{ target_user }}"
+    recurse: no
+
+- name: Display installation summary
+  debug:
+    msg: |
+      ============================================================
+      Arch Linux Development Environment Setup Complete!
+      ============================================================
+      
+      System configured for: {{ hostname }}
+      User: {{ target_user }}
+      Hardware: {{ hardware_model }}
+      Desktop: {{ primary_desktop }}
+      
+      Next Steps:
+      1. Reboot to ensure all changes take effect
+      2. Review ~/post-install-checklist.md
+      3. Run 'sysinfo' to verify installation
+      4. Configure personal preferences
+      
+      Quick Commands:
+      - System info:     sysinfo
+      - Update all:      update-all
+      - Power modes:     power-mode-menu
+      - Search packages: search-packages
+      
+      ============================================================
+
+- name: Create MOTD with system info
+  copy:
+    content: |
+      #!/bin/sh
+      echo "======================================"
+      echo " Welcome to {{ hostname }}"
+      echo "======================================"
+      echo "Arch Linux | Kernel: $(uname -r)"
+      echo "CPU: $(lscpu | grep 'Model name' | cut -d':' -f2 | xargs | cut -c1-40)"
+      echo "Memory: $(free -h | awk '/^Mem:/ {print $3 "/" $2}')"
+      echo "Uptime: $(uptime -p)"
+      echo ""
+      echo "Quick commands:"
+      echo "  sysinfo    - System information"
+      echo "  update-all - Update everything"
+      echo "======================================"
+    dest: /etc/profile.d/motd.sh
+    mode: '0755'
+  when: not vm_mode

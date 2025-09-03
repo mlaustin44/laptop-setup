@@ -1,0 +1,180 @@
+---
+# Task 11: Additional Applications (Native packages preferred over Flatpak)
+
+# Most applications are already installed in previous tasks via pacman or AUR
+# This task handles any remaining apps and provides Flatpak as a fallback option
+
+- name: Install additional AUR applications
+  become: no
+  become_user: "{{ target_user }}"
+  command: paru -S --noconfirm --needed {{ item }}
+  loop:
+    # Communication apps (if not already installed)
+    - signal-desktop
+    - whatsapp-for-linux
+    - element-desktop
+    - mattermost-desktop-bin
+    
+    # Additional development tools
+    - mongodb-compass
+    - redis-insight
+    - bruno-bin  # API client alternative to Postman
+    - httpie-desktop-appimage
+    
+    # Additional productivity
+    - todoist-electron
+    - joplin-desktop
+    - anytype-bin
+    - remnote
+    - zettlr-bin
+    
+    # Media tools
+    - olive-video-editor
+    - lightworks
+    - bitwig-studio-demo
+    - reaper
+    
+    # System tools
+    - stacer
+    - bleachbit
+    - gnome-firmware
+    
+    # Cloud storage
+    - dropbox
+    - onedrive-abraunegg
+    - megasync-bin
+    - pcloud-drive
+    
+    # Gaming (optional)
+    - steam
+    - lutris
+    - heroic-games-launcher-bin
+    - bottles
+    - mangohud
+    - gamemode
+    - proton-ge-custom-bin
+    
+    # Specialized tools
+    - deckboard  # Stream deck alternative
+    - barrier  # Software KVM
+    - input-leap-git  # Barrier fork
+  register: additional_aur_install
+  failed_when: false
+  changed_when: "'Nothing to do' not in additional_aur_install.stdout"
+
+- name: Install Flatpak only if explicitly requested
+  block:
+    - name: Install Flatpak runtime
+      pacman:
+        name:
+          - flatpak
+          - xdg-desktop-portal
+          - xdg-desktop-portal-gtk
+        state: present
+
+    - name: Add Flathub repository
+      flatpak_remote:
+        name: flathub
+        state: present
+        flatpakrepo_url: https://flathub.org/repo/flathub.flatpakrepo
+
+    - name: Note about Flatpak
+      debug:
+        msg: |
+          Flatpak is installed but not actively used on Arch.
+          Native packages from official repos and AUR are preferred.
+          Use Flatpak only for apps not available in AUR or when sandboxing is specifically needed.
+  when: install_flatpak | default(false)
+
+- name: Create app update script for AUR
+  copy:
+    content: |
+      #!/bin/bash
+      # Update all system packages and AUR packages
+      
+      echo "==================================="
+      echo "System and Application Update"
+      echo "==================================="
+      echo
+      
+      echo "Updating package databases..."
+      sudo pacman -Sy
+      
+      echo
+      echo "Updating system packages..."
+      sudo pacman -Su --noconfirm
+      
+      echo
+      echo "Updating AUR packages..."
+      paru -Sua --noconfirm
+      
+      echo
+      echo "Cleaning package cache..."
+      paru -Sc --noconfirm
+      
+      echo
+      echo "Removing orphaned packages..."
+      if [ -n "$(pacman -Qtdq)" ]; then
+          sudo pacman -Rns $(pacman -Qtdq) --noconfirm
+      else
+          echo "No orphaned packages found."
+      fi
+      
+      # Optional: Update Flatpak if installed
+      if command -v flatpak &> /dev/null; then
+          echo
+          echo "Updating Flatpak applications..."
+          flatpak update -y
+          flatpak uninstall --unused -y
+      fi
+      
+      echo
+      echo "==================================="
+      echo "Update complete!"
+      echo "==================================="
+    dest: "/home/{{ target_user }}/.local/bin/update-all"
+    owner: "{{ target_user }}"
+    group: "{{ target_user }}"
+    mode: '0755'
+
+- name: Create AUR package search helper
+  copy:
+    content: |
+      #!/bin/bash
+      # Search for packages in repos and AUR
+      
+      if [ $# -eq 0 ]; then
+          echo "Usage: $0 <package-name>"
+          exit 1
+      fi
+      
+      echo "=== Official Repositories ==="
+      pacman -Ss "$1" 2>/dev/null | head -20
+      
+      echo
+      echo "=== AUR Packages ==="
+      paru -Ss "$1" 2>/dev/null | grep -E "^aur/" | head -20
+      
+      echo
+      echo "Use 'pacman -Si <package>' for official repo info"
+      echo "Use 'paru -Si <package>' for AUR package info"
+    dest: "/home/{{ target_user }}/.local/bin/search-packages"
+    owner: "{{ target_user }}"
+    group: "{{ target_user }}"
+    mode: '0755'
+
+- name: Note about package management
+  debug:
+    msg: |
+      ============================================================
+      Package Management on Arch Linux:
+      
+      1. Official packages: sudo pacman -S <package>
+      2. AUR packages: paru -S <package>
+      3. Search packages: search-packages <name>
+      4. Update everything: update-all
+      
+      Most applications are available natively - avoid Flatpak
+      unless you specifically need sandboxing or the app is
+      not available in the AUR.
+      ============================================================

@@ -1,45 +1,109 @@
 ---
-- name: Configure Development Laptop
-  hosts: localhost
-  connection: local
+# Arch Linux Development Machine Setup
+# For ASUS Zenbook UM5606
+
+- name: Arch Linux Development Environment Setup
+  hosts: all
   become: yes
-  vars:
-    target_user: "ubuntu"
-    target_home: "/home/ubuntu"
+  vars_files:
+    - group_vars/all.yml
+  
+  pre_tasks:
+    - name: Verify running on Arch Linux
+      fail:
+        msg: "This playbook is designed for Arch Linux only"
+      when: ansible_distribution != "Archlinux"
     
-  tasks:
-    - name: Update apt cache
-      apt:
+    - name: Update pacman cache
+      pacman:
         update_cache: yes
-        cache_valid_time: 3600
-
-    - name: Install system packages
-      include_tasks: tasks/system-packages.yml
-
-    - name: Setup development environments
-      include_tasks: tasks/development.yml
-
-    - name: Install Python packages
-      include_tasks: tasks/python-packages.yml
-
-    - name: Install manual binaries
-      include_tasks: tasks/manual-binaries.yml
-
-    - name: Install applications
-      include_tasks: tasks/applications.yml
-
-    - name: Configure shell environment  
-      include_tasks: tasks/shell.yml
-
-    - name: Deploy configuration files
-      include_tasks: tasks/dotfiles.yml
-
-    - name: Configure desktop environment
-      include_tasks: tasks/desktop.yml
-
+      
+    - name: Perform full system upgrade
+      pacman:
+        upgrade: yes
+  
+  tasks:
+    # Phase 1: Base System Configuration
+    - import_tasks: tasks/01-system-base.yml
+      tags: [base, system]
+    
+    # Phase 2: Hardware Configuration (UM5606 + Dell U4021QW)
+    - import_tasks: tasks/02-hardware-enhanced.yml
+      tags: [hardware, um5606, dell]
+      when: hardware_model == "UM5606" or vm_mode != true
+    
+    # Phase 3: Core Packages
+    - import_tasks: tasks/03-packages-core.yml
+      tags: [packages, core]
+    
+    # Phase 4: AUR Setup and Packages
+    - import_tasks: tasks/04-packages-aur.yml
+      tags: [packages, aur]
+    
+    # Phase 5: Development Environment
+    - import_tasks: tasks/05-development.yml
+      tags: [development, dev]
+    
+    # Phase 6: Desktop Environments with Dotfiles
+    - import_tasks: tasks/06-desktop-dotfiles.yml
+      tags: [desktop, gui, dotfiles]
+      when: install_desktop | default(true)
+    
+    # Phase 7: Power Management
+    - import_tasks: tasks/07-power.yml
+      tags: [power, battery]
+      when: laptop_mode | default(true) and vm_mode != true
+    
+    # Phase 8: Network and VPN
+    - import_tasks: tasks/08-network.yml
+      tags: [network, vpn]
+    
+    # Phase 9: User Configuration (Minimal overrides)
+    - import_tasks: tasks/09-user-minimal.yml
+      tags: [user, dotfiles]
+      become_user: "{{ target_user }}"
+      become: yes
+    
+    # Phase 10: Services Configuration
+    - import_tasks: tasks/10-services.yml
+      tags: [services, systemd]
+    
+    # Phase 11: Optional Applications
+    - import_tasks: tasks/11-optional-apps.yml
+      tags: [optional, apps]
+    
+    # Phase 12: Utility Scripts
+    - import_tasks: tasks/13-utility-scripts.yml
+      tags: [scripts, utilities]
+    
+    # Phase 13: BTRFS Maintenance
+    - import_tasks: tasks/14-btrfs-maintenance.yml
+      tags: [btrfs, maintenance]
+      when: not vm_mode
+    
+    # Phase 14: Audio Configuration
+    - import_tasks: tasks/15-audio-pipewire.yml
+      tags: [audio, pipewire]
+    
+    # Phase 15: Final Configuration
+    - import_tasks: tasks/12-finalize.yml
+      tags: [finalize, validation]
+  
   handlers:
-    - name: restart docker
+    - name: restart keyd
       systemd:
-        name: docker
+        name: keyd
         state: restarted
-        daemon_reload: yes
+    
+    - name: restart greetd
+      systemd:
+        name: greetd
+        state: restarted
+    
+    - name: restart iwd
+      systemd:
+        name: iwd
+        state: restarted
+    
+    - name: regenerate initramfs
+      command: mkinitcpio -P

@@ -1,0 +1,35 @@
+#!/bin/bash
+# Update everything
+
+echo "==================================="
+echo "System and Application Update"
+echo "==================================="
+echo
+
+echo "📦 Updating package databases..."
+sudo pacman -Sy
+
+echo
+echo "📦 Updating system packages..."
+sudo pacman -Su --noconfirm
+
+echo
+echo "📦 Updating AUR packages..."
+paru -Sua --noconfirm
+
+echo
+echo "🧹 Cleaning package cache..."
+paru -Sc --noconfirm
+
+echo
+echo "🧹 Removing orphaned packages..."
+if [ -n "$(pacman -Qtdq)" ]; then
+    sudo pacman -Rns $(pacman -Qtdq) --noconfirm
+else
+    echo "No orphaned packages found."
+fi
+
+echo
+echo "==================================="
+echo "✅ Update complete!"
+echo "====================================="

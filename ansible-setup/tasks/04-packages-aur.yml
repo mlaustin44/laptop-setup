@@ -1,0 +1,199 @@
+---
+# Task 04: AUR Helper and AUR Packages
+
+- name: Check if AUR helper is installed
+  command: which paru
+  register: paru_check
+  ignore_errors: yes
+  changed_when: false
+
+- name: Install paru AUR helper
+  block:
+    - name: Install dependencies for building paru
+      pacman:
+        name:
+          - git
+          - base-devel
+          - rust
+        state: present
+
+    - name: Clone paru repository
+      git:
+        repo: https://aur.archlinux.org/paru-bin.git
+        dest: /tmp/paru-bin
+        version: master
+      become: no
+      become_user: "{{ target_user }}"
+
+    - name: Build and install paru
+      command: makepkg -si --noconfirm
+      args:
+        chdir: /tmp/paru-bin
+      become: no
+      become_user: "{{ target_user }}"
+      environment:
+        MAKEFLAGS: "-j{{ ansible_processor_vcpus }}"
+
+    - name: Clean up paru build directory
+      file:
+        path: /tmp/paru-bin
+        state: absent
+  when: paru_check.rc != 0
+
+- name: Configure paru
+  copy:
+    content: |
+      [options]
+      BottomUp
+      SudoLoop
+      CleanAfter
+      UpgradeMenu
+      NewsOnUpgrade
+      BatchInstall
+      UseAsk
+      CombinedUpgrade
+      
+      [bin]
+      FileManager = ranger
+    dest: "/home/{{ target_user }}/.config/paru/paru.conf"
+    owner: "{{ target_user }}"
+    group: "{{ target_user }}"
+    mode: '0644'
+  ignore_errors: yes
+
+- name: Install AUR packages
+  become: no
+  become_user: "{{ target_user }}"
+  command: paru -S --noconfirm --needed {{ item }}
+  loop:
+    # System utilities
+    - keyd-git
+    - auto-cpufreq
+    - ryzenadj-git
+    - asus-nb-ctrl-git  # ASUS laptop control
+    - asusctl  # Alternative ASUS control
+    - supergfxctl  # GPU switching for ASUS
+    - asus-fan-control  # Fan control for ASUS
+    
+    # Display managers and greeters
+    - greetd
+    - greetd-tuigreet
+    - greetd-regreet-git
+    
+    # Networking
+    - tailscale
+    - networkmanager-openvpn
+    
+    # Development tools
+    - visual-studio-code-bin
+    - sublime-text-4
+    - jetbrains-toolbox
+    - postman-bin
+    - insomnia-bin
+    - lazygit
+    - lazydocker
+    - dive  # Docker image explorer
+    
+    # Browsers
+    - google-chrome
+    - brave-bin
+    - firefox-developer-edition
+    
+    # Communication
+    - slack-desktop
+    - teams
+    - zoom
+    - discord
+    - telegram-desktop
+    
+    # Python tools
+    - uv  # Fast Python package manager
+    - pyenv
+    - poetry
+    
+    # Cloud tools
+    - aws-cli-v2-bin
+    - azure-cli
+    - google-cloud-cli
+    
+    # Terminal enhancements
+    - starship-bin
+    - zoxide-bin
+    - atuin  # Shell history
+    
+    # System monitoring
+    - bottom-bin
+    - zenith-bin
+    
+    # Fonts
+    - ttf-meslo-nerd
+    - ttf-iosevka-nerd
+    - ttf-firacode-nerd
+    
+    # Media
+    - spotify
+    - spotify-tui
+    - ncspot
+    
+    # Note taking
+    - obsidian
+    - logseq-desktop-bin
+    - notion-app-enhanced
+    
+    # Other utilities
+    - timeshift
+    - timeshift-autosnap
+    - snapper-gui-git
+    - ventoy-bin
+    - balena-etcher
+    - cpu-x
+    - corectrl
+    - openrgb-bin
+    - fancontrol-gui
+  register: aur_install
+  failed_when: false
+  changed_when: "'Nothing to do' not in aur_install.stdout"
+
+- name: Install additional development AUR packages
+  become: no
+  become_user: "{{ target_user }}"
+  command: paru -S --noconfirm --needed {{ item }}
+  loop:
+    - kubectl-bin
+    - kubectx
+    - k9s-bin
+    - helm-bin
+    - minikube-bin
+    - kind-bin
+    - terraform-bin
+    - ansible-lint
+    - yamllint
+    - hadolint-bin
+    - shellcheck-bin
+    - shfmt
+    - act  # GitHub Actions locally
+  when: install_docker
+  register: dev_aur_install
+  failed_when: false
+  changed_when: "'Nothing to do' not in dev_aur_install.stdout"
+
+- name: Install Wayland specific AUR packages
+  become: no
+  become_user: "{{ target_user }}"
+  command: paru -S --noconfirm --needed {{ item }}
+  loop:
+    - wlr-randr
+    - wdisplays
+    - wl-clipboard
+    - clipman
+    - wf-recorder
+    - wlsunset
+    - swaylock-effects-git
+    - rofi-lbonn-wayland-git
+    - waybar-hyprland-git
+    - hyprpicker-git
+    - grimblast-git
+  when: install_sway or install_hyprland
+  register: wayland_aur_install
+  failed_when: false
+  changed_when: "'Nothing to do' not in wayland_aur_install.stdout"

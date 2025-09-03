@@ -1,0 +1,436 @@
+---
+# Task 02: Enhanced Hardware Configuration (UM5606 + Dell U4021QW)
+
+- name: Install hardware-specific packages
+  pacman:
+    name:
+      - mesa
+      - vulkan-radeon
+      - libva-mesa-driver
+      - mesa-vdpau
+      - xf86-video-amdgpu
+      - amd-ucode
+      - acpi
+      - acpid
+      - lm_sensors
+      - tpm2-tss
+      - tpm2-tools
+      - fwupd
+      - bolt  # Thunderbolt support
+      - thunderbolt-tools
+    state: present
+
+- name: Configure TPM2 for LUKS auto-unlock
+  block:
+    - name: Check if LUKS device exists
+      stat:
+        path: "{{ luks_device }}"
+      register: luks_check
+      when: enable_luks_tpm2
+
+    - name: Enroll TPM2 for LUKS
+      command: systemd-cryptenroll --tpm2-device=auto {{ luks_device }}
+      when: 
+        - enable_luks_tpm2
+        - luks_check.stat.exists
+        - not vm_mode
+      ignore_errors: yes
+
+    - name: Configure crypttab for TPM2
+      lineinfile:
+        path: /etc/crypttab.initramfs
+        regexp: '^cryptroot'
+        line: "cryptroot UUID={{ ansible_facts['devices'][luks_device]['links']['uuids'][0] | default('PLACEHOLDER') }} none tpm2-device=auto"
+        create: yes
+      when:
+        - enable_luks_tpm2
+        - not vm_mode
+      ignore_errors: yes
+
+- name: Configure mkinitcpio for hardware
+  lineinfile:
+    path: /etc/mkinitcpio.conf
+    regexp: '^MODULES='
+    line: 'MODULES=(amdgpu)'
+  notify: regenerate initramfs
+  when: hardware_model == "UM5606"
+
+- name: Add TPM2 to mkinitcpio hooks
+  lineinfile:
+    path: /etc/mkinitcpio.conf
+    regexp: '^HOOKS='
+    line: 'HOOKS=(base systemd autodetect modconf kms keyboard sd-vconsole block sd-encrypt filesystems fsck)'
+  notify: regenerate initramfs
+  when: 
+    - enable_luks_tpm2
+    - not vm_mode
+
+- name: Configure BTRFS mount options in fstab
+  mount:
+    path: "{{ item }}"
+    src: LABEL=ROOT
+    fstype: btrfs
+    opts: "subvol={{ item }},noatime,compress=zstd:1,space_cache=v2,autodefrag"
+    state: present
+  loop:
+    - /
+    - /home
+    - /var
+    - /var/log
+    - /.snapshots
+  when: not vm_mode
+  ignore_errors: yes
+
+- name: Create 96GB swap file for hibernation
+  block:
+    - name: Create swap subvolume
+      command: |
+        mount -o subvol=/ /dev/mapper/cryptroot /mnt
+        btrfs subvolume create /mnt/@swap
+        umount /mnt
+      args:
+        creates: /.snapshots
+      when: not vm_mode
+      ignore_errors: yes
+
+    - name: Mount swap subvolume
+      mount:
+        path: /swap
+        src: /dev/mapper/cryptroot
+        fstype: btrfs
+        opts: subvol=@swap,noatime,nodatacow
+        state: mounted
+      when: not vm_mode
+      ignore_errors: yes
+
+    - name: Create swap directory if not using BTRFS
+      file:
+        path: /swap
+        state: directory
+        mode: '0755'
+      when: vm_mode
+
+    - name: Create 96GB swap file with proper BTRFS attributes
+      shell: |
+        cd /swap
+        truncate -s 0 swapfile
+        chattr +C swapfile  # No COW for swap
+        btrfs property set swapfile compression none 2>/dev/null || true
+        fallocate -l {{ swap_size }} swapfile
+        chmod 600 swapfile
+        mkswap swapfile
+      args:
+        creates: /swap/swapfile
+      when: enable_hibernation
+
+    - name: Enable swap
+      command: swapon /swap/swapfile
+      when: enable_hibernation
+      ignore_errors: yes
+
+    - name: Add swap to fstab
+      mount:
+        path: none
+        src: /swap/swapfile
+        fstype: swap
+        opts: defaults
+        state: present
+      when: enable_hibernation
+
+- name: Configure hibernation
+  block:
+    - name: Get swap file offset
+      shell: filefrag -v /swap/swapfile | awk '$1=="0:" {print substr($4, 1, length($4)-2)}'
+      register: swap_offset
+      when: enable_hibernation
+      ignore_errors: yes
+
+    - name: Configure systemd sleep for hibernation
+      copy:
+        content: |
+          [Sleep]
+          AllowSuspend=yes
+          AllowHibernation=yes
+          AllowSuspendThenHibernate=yes
+          HibernateDelaySec=1800
+        dest: /etc/systemd/sleep.conf
+      when: enable_hibernation
+
+    - name: Get swap device UUID
+      command: findmnt -no UUID /swap
+      register: swap_uuid
+      when: enable_hibernation
+      ignore_errors: yes
+
+    - name: Update systemd-boot entries for hibernation
+      block:
+        - name: Find systemd-boot entry files
+          find:
+            paths: /boot/loader/entries
+            patterns: "*.conf"
+          register: boot_entries
+        
+        - name: Add hibernation parameters to systemd-boot entries
+          lineinfile:
+            path: "{{ item.path }}"
+            regexp: '^(options .*)$'
+            line: '\1 resume=UUID={{ swap_uuid.stdout | default("SWAP-UUID") }} resume_offset={{ swap_offset.stdout | default("0") }}'
+            backrefs: yes
+          loop: "{{ boot_entries.files }}"
+          when: boot_entries.files is defined
+      when: 
+        - enable_hibernation
+        - not vm_mode
+
+# Dell U4021QW Monitor and Dock Support
+- name: Configure Dell U4021QW monitor support
+  block:
+    - name: Create dock handler script
+      copy:
+        content: |
+          #!/bin/bash
+          # Dock handler for Dell U4021QW and Thunderbolt dock
+          
+          LID_STATE=$(cat /proc/acpi/button/lid/LID0/state 2>/dev/null | awk '{print $2}')
+          DELL_AUDIO=$(pactl list sinks short | grep "Dell.*U4021QW" | cut -f2)
+          DISPLAYS=$(find /sys/class/drm/*/status -exec grep -l "^connected" {} \; | wc -l)
+          
+          log_event() {
+            logger "dock-handler: $1 (lid: $LID_STATE, displays: $DISPLAYS)"
+          }
+          
+          case "$1" in
+            connect)
+              log_event "Dock connected"
+              
+              # Wake if lid closed
+              if [ "$LID_STATE" = "closed" ] && [ "$DISPLAYS" -gt 1 ]; then
+                systemctl stop systemd-suspend.service 2>/dev/null
+              fi
+              
+              # Switch audio to Dell speakers
+              sleep 2  # Wait for audio to stabilize
+              
+              # Find Dell audio sink (PipeWire)
+              DELL_SINK=$(pactl list sinks short | grep -i "dell.*u4021qw" | cut -f2 | head -1)
+              if [ -z "$DELL_SINK" ]; then
+                # Try alternative naming
+                DELL_SINK=$(pactl list sinks short | grep -i "displayport\|hdmi" | cut -f2 | head -1)
+              fi
+              
+              if [ -n "$DELL_SINK" ]; then
+                pactl set-default-sink "$DELL_SINK"
+                # Move all playing streams to Dell
+                pactl list sink-inputs short | cut -f1 | while read stream; do
+                  pactl move-sink-input "$stream" "$DELL_SINK" 2>/dev/null
+                done
+                notify-send "🔊 Audio" "Switched to Dell U4021QW speakers" -i audio-volume-high
+              fi
+              
+              # Set performance mode when docked
+              ~/.local/bin/power-mode set performance
+              
+              # Switch to docked display profile
+              if pgrep -x sway > /dev/null; then
+                kanshictl switch-to-profile dell-4k-extend
+              fi
+              ;;
+              
+            disconnect)
+              log_event "Dock disconnected"
+              
+              # Switch audio back to laptop
+              LAPTOP_AUDIO=$(pactl list sinks short | grep -E "alsa.*analog-stereo" | head -1 | cut -f2)
+              if [ -n "$LAPTOP_AUDIO" ]; then
+                pactl set-default-sink "$LAPTOP_AUDIO"
+              fi
+              
+              # Set balanced mode on battery
+              ~/.local/bin/power-mode set balanced
+              
+              # Switch to laptop profile
+              if pgrep -x sway > /dev/null; then
+                kanshictl switch-to-profile laptop
+              fi
+              
+              # Suspend if lid closed
+              if [ "$LID_STATE" = "closed" ]; then
+                systemctl suspend-then-hibernate
+              fi
+              ;;
+              
+            display-change)
+              log_event "Display change detected"
+              
+              # Auto-switch display profile
+              if [ "$LID_STATE" = "closed" ] && [ "$DISPLAYS" -gt 1 ]; then
+                systemctl stop systemd-suspend.service 2>/dev/null
+              elif [ "$LID_STATE" = "closed" ] && [ "$DISPLAYS" -eq 1 ]; then
+                systemctl suspend-then-hibernate
+              fi
+              ;;
+          esac
+        dest: /usr/local/bin/dock-handler
+        mode: '0755'
+
+    - name: Create udev rule for dock detection
+      copy:
+        content: |
+          # Dell U4021QW Thunderbolt dock detection
+          ACTION=="add", SUBSYSTEM=="thunderbolt", ATTR{authorized}=="1", RUN+="/usr/local/bin/dock-handler connect"
+          ACTION=="remove", SUBSYSTEM=="thunderbolt", RUN+="/usr/local/bin/dock-handler disconnect"
+          
+          # Display hotplug detection
+          ACTION=="change", SUBSYSTEM=="drm", ENV{DISPLAY}=":0", ENV{XAUTHORITY}="/home/{{ target_user }}/.Xauthority", RUN+="/usr/local/bin/dock-handler display-change"
+        dest: /etc/udev/rules.d/99-dock-monitor.rules
+
+    - name: Create systemd service for dock wake
+      copy:
+        content: |
+          [Unit]
+          Description=Handle dock wake events
+          After=multi-user.target suspend.target hibernate.target hybrid-sleep.target
+          
+          [Service]
+          Type=oneshot
+          ExecStart=/usr/local/bin/dock-handler display-change
+          
+          [Install]
+          WantedBy=suspend.target hibernate.target hybrid-sleep.target
+        dest: /etc/systemd/system/dock-wake.service
+
+    - name: Enable dock wake service
+      systemd:
+        name: dock-wake
+        enabled: yes
+        daemon_reload: yes
+
+- name: Create comprehensive display toggle script
+  copy:
+    content: |
+      #!/bin/bash
+      # F7 Display toggle for mirror/extend on external displays
+      
+      STATE_FILE="/tmp/display_state"
+      CURRENT_STATE=$(cat "$STATE_FILE" 2>/dev/null || echo "extend")
+      
+      # Detect current compositor
+      if pgrep -x sway > /dev/null; then
+        COMPOSITOR="sway"
+        DISPLAY_CMD="swaymsg output"
+      elif pgrep -x Hyprland > /dev/null; then
+        COMPOSITOR="hyprland"
+        DISPLAY_CMD="hyprctl monitors"
+      else
+        echo "No supported compositor running"
+        exit 1
+      fi
+      
+      # Detect external displays
+      if [ "$COMPOSITOR" = "sway" ]; then
+        EXTERNAL_DISPLAYS=$(swaymsg -t get_outputs | jq -r '.[] | select(.name != "eDP-1") | .name' | wc -l)
+      else
+        EXTERNAL_DISPLAYS=$(hyprctl monitors -j | jq -r '.[] | select(.name != "eDP-1") | .name' | wc -l)
+      fi
+      
+      if [ "$EXTERNAL_DISPLAYS" -eq 0 ]; then
+        # No external display, laptop only
+        kanshictl switch-to-profile laptop
+        notify-send "Display" "Laptop only"
+        echo "laptop" > "$STATE_FILE"
+      else
+        # External display connected - toggle between mirror and extend
+        if [ "$CURRENT_STATE" = "extend" ]; then
+          # Switch to mirror
+          if kanshictl list | grep -q "dell-4k"; then
+            kanshictl switch-to-profile dell-4k-mirror
+            notify-send "Display" "Mirror Mode (Dell 5K)"
+          else
+            kanshictl switch-to-profile external-1080p-mirror
+            notify-send "Display" "Mirror Mode"
+          fi
+          echo "mirror" > "$STATE_FILE"
+        else
+          # Switch to extend
+          if kanshictl list | grep -q "dell-4k"; then
+            kanshictl switch-to-profile dell-4k-extend
+            notify-send "Display" "Extend Mode (Dell 5K)"
+          else
+            kanshictl switch-to-profile external-1080p-extend
+            notify-send "Display" "Extend Mode"
+          fi
+          echo "extend" > "$STATE_FILE"
+        fi
+      fi
+    dest: "/home/{{ target_user }}/.local/bin/display-toggle"
+    owner: "{{ target_user }}"
+    group: "{{ target_user }}"
+    mode: '0755'
+
+# OLED Display Protection
+- name: Configure display for OLED protection
+  block:
+    - name: Create OLED pixel shift script
+      copy:
+        content: |
+          #!/bin/bash
+          # OLED burn-in protection script
+          while true; do
+            sleep 300  # Every 5 minutes
+            if pgrep -x sway > /dev/null; then
+              swaymsg output eDP-1 subpixel rgb
+              sleep 1
+              swaymsg output eDP-1 subpixel none
+            elif pgrep -x Hyprland > /dev/null; then
+              hyprctl keyword monitor eDP-1,2880x1800@120,1x1,1.5
+              sleep 1
+              hyprctl keyword monitor eDP-1,2880x1800@120,0x0,1.5
+            fi
+          done
+        dest: /usr/local/bin/oled-protect
+        mode: '0755'
+      when: oled_display
+
+    - name: Create systemd service for OLED protection
+      copy:
+        content: |
+          [Unit]
+          Description=OLED Burn-in Protection
+          After=graphical.target
+          
+          [Service]
+          Type=simple
+          ExecStart=/usr/local/bin/oled-protect
+          Restart=always
+          User={{ target_user }}
+          Environment="DISPLAY=:0"
+          
+          [Install]
+          WantedBy=default.target
+        dest: /etc/systemd/system/oled-protect.service
+      when: oled_display
+
+    - name: Enable OLED protection service
+      systemd:
+        name: oled-protect
+        enabled: yes
+        state: started
+        daemon_reload: yes
+      when: oled_display and not vm_mode
+
+- name: Install laptop specific tools
+  pacman:
+    name:
+      - brightnessctl
+      - light
+      - acpilight
+    state: present
+  when: laptop_mode
+
+# Enable Thunderbolt service
+- name: Enable bolt service for Thunderbolt
+  systemd:
+    name: bolt
+    enabled: yes
+    state: started
+  when: not vm_mode

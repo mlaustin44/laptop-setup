@@ -1,0 +1,261 @@
+---
+# Task 08: Network and VPN Configuration
+
+- name: Install network packages
+  pacman:
+    name:
+      - networkmanager
+      - networkmanager-openvpn
+      - network-manager-applet
+      - nm-connection-editor
+      - iwd
+      - wpa_supplicant
+      - dhcpcd
+      - dnsmasq
+      - openresolv
+      - avahi
+      - nss-mdns
+      - bluez
+      - bluez-utils
+      - blueman
+    state: present
+
+- name: Configure iwd for UM5606 WiFi
+  block:
+    - name: Create iwd configuration
+      copy:
+        content: |
+          [General]
+          EnableNetworkConfiguration=true
+          
+          [Network]
+          EnableIPv6=true
+          NameResolvingService=systemd
+          
+          [Settings]
+          AutoConnect=true
+          AlwayRandomizeAddress=false
+        dest: /etc/iwd/main.conf
+      when: use_iwd
+
+    - name: Create iwd network configuration directory
+      file:
+        path: /var/lib/iwd
+        state: directory
+        mode: '0700'
+      when: use_iwd
+
+    - name: Configure NetworkManager to use iwd
+      copy:
+        content: |
+          [device]
+          wifi.backend=iwd
+        dest: /etc/NetworkManager/conf.d/wifi-backend.conf
+      when: use_iwd
+
+- name: Configure DNS
+  copy:
+    content: |
+      [Resolve]
+      DNS={{ dns_servers | join(' ') }}
+      FallbackDNS=8.8.8.8 8.8.4.4
+      Domains=~.
+      DNSOverTLS=opportunistic
+      DNSSEC=allow-downgrade
+      DNSStubListener=no
+    dest: /etc/systemd/resolved.conf.d/dns.conf
+  notify: restart resolved
+
+- name: Install Tailscale from AUR
+  become: no
+  become_user: "{{ target_user }}"
+  command: paru -S --noconfirm --needed tailscale
+  register: tailscale_install
+  failed_when: false
+  changed_when: "'Nothing to do' not in tailscale_install.stdout"
+
+- name: Configure Bluetooth
+  block:
+    - name: Configure Bluetooth auto-connect
+      copy:
+        content: |
+          [General]
+          Enable=Source,Sink,Media,Socket
+          DiscoverableTimeout=0
+          Discoverable=false
+          AlwaysPairable=false
+          FastConnectable=true
+          Privacy=device
+          
+          [Policy]
+          AutoEnable=true
+          ReconnectAttempts=7
+          ReconnectIntervals=1,2,4,8,16,32,64
+          
+          [LE]
+          EnableAdvMonInterleaveScan=true
+        dest: /etc/bluetooth/main.conf
+      notify: restart bluetooth
+
+    - name: Configure Bluetooth audio
+      copy:
+        content: |
+          [General]
+          Enable=Source,Sink,Media,Socket
+          
+          [A2DP]
+          SBCSamplingRate=48000
+          SBCChannelMode=Joint
+          SBCBlockLength=16
+          SBCSubbands=8
+          SBCAllocation=Loudness
+          SBCMinBitpool=2
+          SBCMaxBitpool=53
+        dest: /etc/bluetooth/audio.conf
+      notify: restart bluetooth
+
+- name: Configure firewall
+  block:
+    - name: Install firewall packages
+      pacman:
+        name:
+          - ufw
+          - gufw
+        state: present
+
+    - name: Configure UFW defaults
+      ufw:
+        direction: "{{ item.direction }}"
+        policy: "{{ item.policy }}"
+      loop:
+        - { direction: incoming, policy: deny }
+        - { direction: outgoing, policy: allow }
+
+    - name: Allow SSH
+      ufw:
+        rule: allow
+        port: ssh
+        proto: tcp
+
+    - name: Allow mDNS
+      ufw:
+        rule: allow
+        port: 5353
+        proto: udp
+
+    - name: Allow Tailscale
+      ufw:
+        rule: allow
+        port: 41641
+        proto: udp
+
+    - name: Enable UFW
+      ufw:
+        state: enabled
+  when: not vm_mode
+
+- name: Configure network services
+  systemd:
+    name: "{{ item }}"
+    enabled: yes
+    state: started
+  loop:
+    - "{{ 'iwd' if use_iwd else 'NetworkManager' }}"
+    - systemd-resolved
+    - bluetooth
+    - avahi-daemon
+    - tailscaled
+
+- name: Disable conflicting network services
+  systemd:
+    name: "{{ item }}"
+    enabled: no
+    state: stopped
+  loop:
+    - "{{ 'NetworkManager' if use_iwd else 'iwd' }}"
+    - systemd-networkd
+  ignore_errors: yes
+
+- name: Create network helper scripts
+  copy:
+    content: |
+      #!/bin/bash
+      # WiFi network switcher
+      
+      if command -v nmcli &> /dev/null; then
+          # NetworkManager
+          SSID=$(nmcli -t -f SSID,ACTIVE dev wifi | grep ':yes' | cut -d: -f1)
+          echo "Current network: $SSID"
+          
+          echo "Available networks:"
+          nmcli dev wifi list
+          
+          read -p "Enter SSID to connect: " NEW_SSID
+          nmcli dev wifi connect "$NEW_SSID"
+      elif command -v iwctl &> /dev/null; then
+          # iwd
+          echo "Current network:"
+          iwctl station wlan0 show
+          
+          echo "Available networks:"
+          iwctl station wlan0 scan
+          iwctl station wlan0 get-networks
+          
+          read -p "Enter SSID to connect: " NEW_SSID
+          iwctl station wlan0 connect "$NEW_SSID"
+      fi
+    dest: "/home/{{ target_user }}/.local/bin/wifi-switch"
+    owner: "{{ target_user }}"
+    group: "{{ target_user }}"
+    mode: '0755'
+
+- name: Create VPN helper scripts
+  copy:
+    content: |
+      #!/bin/bash
+      # VPN connection helper
+      
+      case "$1" in
+          tailscale)
+              if systemctl is-active tailscaled &>/dev/null; then
+                  sudo tailscale status
+              else
+                  echo "Starting Tailscale..."
+                  sudo systemctl start tailscaled
+                  sudo tailscale up
+              fi
+              ;;
+          down)
+              echo "Disconnecting VPNs..."
+              sudo tailscale down
+              nmcli con down type vpn
+              ;;
+          status)
+              echo "=== Tailscale ==="
+              sudo tailscale status || echo "Not running"
+              echo ""
+              echo "=== NetworkManager VPNs ==="
+              nmcli con show --active | grep vpn || echo "No active VPN"
+              ;;
+          *)
+              echo "Usage: $0 {tailscale|down|status}"
+              exit 1
+              ;;
+      esac
+    dest: "/home/{{ target_user }}/.local/bin/vpn-control"
+    owner: "{{ target_user }}"
+    group: "{{ target_user }}"
+    mode: '0755'
+
+# Handlers
+- name: restart resolved handler
+  systemd:
+    name: systemd-resolved
+    state: restarted
+  listen: "restart resolved"
+
+- name: restart bluetooth handler
+  systemd:
+    name: bluetooth
+    state: restarted
+  listen: "restart bluetooth"

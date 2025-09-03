@@ -1,164 +1,97 @@
 ---
-user:
-  shell: /usr/bin/zsh
+# Global variables for Arch Linux setup
+
+# User Configuration
+target_user: "mlaustin"
+git_user_name: "Matthew Austin"
+
+# Hardware Configuration
+hardware_model: "UM5606"  # Set to UM5606 for ASUS Zenbook specific configs
+laptop_mode: true
+oled_display: true
+
+# VM Mode - set to true when testing in VM
+vm_mode: "{{ lookup('env', 'VM_MODE') | default(false, true) }}"
+
+# System Configuration
+locale: "en_US.UTF-8"
+timezone: "America/Los_Angeles"
+hostname: "m-zenbook"
+
+# Kernel parameters for UM5606
+kernel_params: "amdgpu.dcdebugmask=0x600"
+
+# LUKS Configuration
+enable_luks_tpm2: true
+luks_device: "/dev/nvme0n1p2"
+
+# Swap Configuration
+swap_size: "96G"
+enable_hibernation: true
+
+# Desktop Environment
+install_desktop: true
+primary_desktop: "gnome"
+install_sway: true
+install_hyprland: true
+display_manager: "greetd"
+
+# Development Tools
+install_rust: true
+install_go: true
+install_docker: true
+python_version: "3.11"
+
+# Package Management
+install_flatpak: true
+install_snap: false
+
+# Power Management
+enable_tlp: true
+enable_auto_cpufreq: true
+oled_protection: true
+
+# Network
+use_iwd: true  # Better for UM5606 WiFi
+dns_servers:
+  - "1.1.1.1"
+  - "1.0.0.1"
+
+# Services to enable
+services_enable:
+  - keyd
+  - tlp
+  - bluetooth
+  - cups
+  - tailscaled
+  - docker
+  - greetd
+  - iwd
+
+# Services to disable
+services_disable:
+  - NetworkManager
+
+# Keyd keyboard remapping (corrected for Copilot key)
+keyd_config: |
+  [ids]
+  *
   
-git:
-  name: "Matthew Austin"
-  editor: vim
+  [main]
+  capslock = esc
+  leftshift+leftmeta+f23 = rightcontrol
 
-versions:
-  node_version: "20"  # LTS
-  go_version: "1.25.0"
-  rust_stable: true
-  python_versions:
-    - "3.11"
-    - "3.12"
-
-# Package Lists
-system_packages:
-  - build-essential
-  - cmake
-  - clang
-  - clang-format
-  - curl
-  - wget
-  - git
-  - vim
-  - htop
-  - tree
-  - unzip
-  - 7zip
-  - jq
-  - fzf
-  - zsh
-  - software-properties-common
-  - apt-transport-https
-  - ca-certificates
-  - gnupg
-  - lsb-release
-  - nmap
-  - bc
-  - lsof
-  - screen
-  - tmux
-  - traceroute
-  - netcat-openbsd
-  - ripgrep
-  - mosh
-  - socat
-  - xxd
-  - xz-utils
-  - wmctrl
-  - upower
-  - openssh-server
-  - gnome-tweaks
-  - postgresql-client
-  - redis-tools
-  - libpq-dev
-
-development_packages:
-  - python3-pip
-  - python3-venv
-  - python3-dev
-  - nodejs
-  - npm
-  - default-jre
-  - default-jdk
-  - openjdk-21-jdk
-  - android-sdk-platform-tools-common
-  - make
-  - g++
-  - gcc
-  - gdb
-  - doxygen
-  - gh
-  - minicom
-  - picocom
-  - putty
-
-additional_packages:
-  - gimp
-  - vlc
-  - transmission
-  - tailscale
-  - ffmpeg
-  - imagemagick
-  - moreutils
-  - wireshark
-  - remmina
-  - sqlite3
-  - virtualbox
-  - wine
-  - gparted
-  - v4l-utils
-
-docker_packages:
-  - docker-ce
-  - docker-ce-cli  
-  - containerd.io
-  - docker-buildx-plugin
-  - docker-compose-plugin
-
-# Flatpak Applications
-flatpak_apps:
-  - app.bluebubbles.BlueBubbles
-  - com.transmissionbt.Transmission
-  - com.ugetdm.uGet
-  - com.usebottles.bottles
-  - hu.irl.cameractrls
-  - io.dbeaver.DBeaverCommunity
-  - net.ankiweb.Anki
-  - org.flameshot.Flameshot
-  - org.telegram.desktop
-  - com.slack.Slack
-  - net.pinta_project.Pinta
-  - org.kicad.KiCad
-  - com.obsproject.Studio
-  - com.github.xournalpp.xournalpp
-  - us.zoom.Zoom
-
-# VSCode Extensions
-vscode_extensions:
-  - anthropic.claude-code
-  - astro-build.astro-vscode
-  - batisteo.vscode-django
-  - docker.docker
-  - editorconfig.editorconfig
-  - golang.go
-  - kahole.magit
-  - mathiasfrohlich.kotlin
-  - ms-azuretools.vscode-containers
-  - ms-azuretools.vscode-docker
-  - ms-python.debugpy
-  - ms-python.python
-  - ms-python.vscode-pylance
-  - ms-python.vscode-python-envs
-  - ms-toolsai.jupyter-keymap
-  - ms-vscode-remote.remote-containers
-  - ms-vscode.cmake-tools
-  - ms-vscode.cpptools
-  - ms-vscode.cpptools-extension-pack
-  - ms-vscode.cpptools-themes
-  - redhat.vscode-yaml
-  - rooveterinaryinc.roo-cline
-  - scala-lang.scala
-  - twxs.cmake
-  - unifiedjs.vscode-mdx
-  - zainchen.json
-  - ziglang.vscode-zig
-
-# oh-my-zsh Configuration
-zsh:
-  theme: robbyrussell
-  plugins:
-    - git
-    - wd
-    - docker
-
-# Desktop Settings
-desktop:
-  clock_format: "24h"
-  keyboard_layouts:
-    - "us"
-    - "us+alt-intl"
-  compose_key: "ralt"
+# Display configurations
+display_configs:
+  laptop:
+    output: "eDP-1"
+    mode: "2880x1800"
+    scale: 1.5
+  external_4k:
+    output: "DP-1"
+    mode: "3840x2160"
+    scale: 1.25
+  external_1080p:
+    output: "HDMI-A-1"
+    mode: "1920x1080"
+    scale: 1.0

@@ -1,0 +1,309 @@
+---
+# Task 10: Services Configuration
+
+- name: Install and configure keyd for keyboard remapping
+  block:
+    - name: Install keyd from AUR
+      become: no
+      become_user: "{{ target_user }}"
+      command: paru -S --noconfirm --needed keyd-git
+      register: keyd_install
+      failed_when: false
+      changed_when: "'Nothing to do' not in keyd_install.stdout"
+
+    - name: Configure keyd
+      template:
+        src: keyd.conf.j2
+        dest: /etc/keyd/default.conf
+      notify: restart keyd
+
+    - name: Enable keyd service
+      systemd:
+        name: keyd
+        enabled: yes
+        state: started
+
+- name: Enable and start critical system services
+  systemd:
+    name: "{{ item }}"
+    enabled: yes
+    state: started
+    daemon_reload: yes
+  loop:
+    - systemd-resolved
+    - systemd-timesyncd
+    - bluetooth
+    - cups
+    - avahi-daemon
+    - acpid
+    - thermald
+    - fstrim.timer
+    - boltd  # Thunderbolt
+    - earlyoom
+  ignore_errors: yes
+  when: not vm_mode
+
+- name: Configure network service (iwd or NetworkManager)
+  systemd:
+    name: "{{ 'iwd' if use_iwd else 'NetworkManager' }}"
+    enabled: yes
+    state: started
+  when: not vm_mode
+
+- name: Configure system services from variables
+  systemd:
+    name: "{{ item }}"
+    enabled: yes
+    state: started
+  loop: "{{ services_enable }}"
+  ignore_errors: yes
+
+- name: Disable conflicting services
+  systemd:
+    name: "{{ item }}"
+    enabled: no
+    state: stopped
+  loop:
+    - "{{ 'NetworkManager' if use_iwd else 'iwd' }}"
+    - systemd-networkd
+    - systemd-rfkill.service
+    - systemd-rfkill.socket
+    - power-profiles-daemon  # Conflicts with TLP
+  ignore_errors: yes
+
+- name: Disable services from variables
+  systemd:
+    name: "{{ item }}"
+    enabled: no
+    state: stopped
+  loop: "{{ services_disable }}"
+  ignore_errors: yes
+
+- name: Configure Docker service
+  block:
+    - name: Enable and start Docker
+      systemd:
+        name: docker
+        enabled: yes
+        state: started
+      when: install_docker
+
+    - name: Enable Docker to start on boot
+      systemd:
+        name: docker.socket
+        enabled: yes
+        state: started
+      when: install_docker
+
+- name: Configure libvirt for virtualization
+  block:
+    - name: Enable libvirtd service
+      systemd:
+        name: libvirtd
+        enabled: yes
+        state: started
+
+    - name: Enable libvirt guests autostart
+      systemd:
+        name: libvirt-guests
+        enabled: yes
+        state: started
+
+    - name: Configure libvirt network
+      command: virsh net-autostart default
+      ignore_errors: yes
+
+- name: Configure CUPS printing service
+  block:
+    - name: Enable CUPS service
+      systemd:
+        name: cups
+        enabled: yes
+        state: started
+
+    - name: Enable CUPS browsing
+      lineinfile:
+        path: /etc/cups/cupsd.conf
+        regexp: '^Browsing'
+        line: 'Browsing On'
+      notify: restart cups
+  when: not vm_mode
+
+- name: Configure systemd-resolved
+  systemd:
+    name: systemd-resolved
+    enabled: yes
+    state: started
+
+- name: Configure Avahi for network discovery
+  block:
+    - name: Enable Avahi daemon
+      systemd:
+        name: avahi-daemon
+        enabled: yes
+        state: started
+
+    - name: Configure Avahi
+      copy:
+        content: |
+          [server]
+          use-ipv4=yes
+          use-ipv6=yes
+          ratelimit-interval-usec=1000000
+          ratelimit-burst=1000
+          
+          [wide-area]
+          enable-wide-area=yes
+          
+          [publish]
+          publish-addresses=yes
+          publish-hinfo=yes
+          publish-workstation=yes
+          publish-domain=yes
+          
+          [reflector]
+          
+          [rlimits]
+        dest: /etc/avahi/avahi-daemon.conf
+      notify: restart avahi
+
+- name: Configure systemd timesyncd
+  block:
+    - name: Configure NTP servers
+      copy:
+        content: |
+          [Time]
+          NTP=0.arch.pool.ntp.org 1.arch.pool.ntp.org 2.arch.pool.ntp.org 3.arch.pool.ntp.org
+          FallbackNTP=0.pool.ntp.org 1.pool.ntp.org
+        dest: /etc/systemd/timesyncd.conf.d/ntp.conf
+
+    - name: Enable timesyncd
+      systemd:
+        name: systemd-timesyncd
+        enabled: yes
+        state: started
+
+- name: Configure systemd-boot (if used)
+  block:
+    - name: Check if systemd-boot is installed
+      stat:
+        path: /boot/EFI/systemd/systemd-bootx64.efi
+      register: systemd_boot_check
+
+    - name: Enable systemd-boot update
+      systemd:
+        name: systemd-boot-update
+        enabled: yes
+      when: systemd_boot_check.stat.exists
+  ignore_errors: yes
+
+- name: Configure fstrim for SSD maintenance
+  block:
+    - name: Enable fstrim timer
+      systemd:
+        name: fstrim.timer
+        enabled: yes
+        state: started
+
+- name: Configure systemd journal
+  block:
+    - name: Configure journal size limits
+      copy:
+        content: |
+          [Journal]
+          Storage=persistent
+          SystemMaxUse=500M
+          SystemKeepFree=1G
+          SystemMaxFileSize=100M
+          MaxRetentionSec=1month
+          ForwardToSyslog=no
+          Compress=yes
+        dest: /etc/systemd/journald.conf.d/size.conf
+      notify: restart journald
+
+- name: Configure earlyoom for OOM prevention
+  block:
+    - name: Install earlyoom
+      pacman:
+        name: earlyoom
+        state: present
+
+    - name: Configure earlyoom
+      copy:
+        content: |
+          EARLYOOM_ARGS="-r 3600 -m 5 -s 10 --avoid '^(systemd|sshd|systemd-logind|systemd-resolved|NetworkManager|iwd|pipewire|wireplumber)$'"
+        dest: /etc/default/earlyoom
+
+    - name: Enable earlyoom
+      systemd:
+        name: earlyoom
+        enabled: yes
+        state: started
+
+- name: Configure systemd user services
+  block:
+    - name: Enable user lingering for target user
+      command: loginctl enable-linger {{ target_user }}
+
+    - name: Create user systemd directory
+      file:
+        path: "/home/{{ target_user }}/.config/systemd/user"
+        state: directory
+        owner: "{{ target_user }}"
+        group: "{{ target_user }}"
+        mode: '0755'
+
+- name: Create system monitoring service
+  copy:
+    content: |
+      [Unit]
+      Description=System Performance Logger
+      After=multi-user.target
+      
+      [Service]
+      Type=simple
+      ExecStart=/usr/bin/bash -c 'while true; do echo "$(date): CPU: $(top -bn1 | grep "Cpu(s)" | sed "s/.*, *\([0-9.]*\)%* id.*/\1/" | awk "{print 100 - \$1}"%"), MEM: $(free -m | awk "/^Mem:/ {print \$3}"MB)" >> /var/log/system-performance.log; sleep 60; done'
+      Restart=always
+      User=root
+      
+      [Install]
+      WantedBy=multi-user.target
+    dest: /etc/systemd/system/system-monitor.service
+  when: not vm_mode
+
+# Handlers
+- name: restart keyd handler
+  systemd:
+    name: keyd
+    state: restarted
+  listen: "restart keyd"
+
+- name: restart cups handler
+  systemd:
+    name: cups
+    state: restarted
+  listen: "restart cups"
+
+- name: restart avahi handler
+  systemd:
+    name: avahi-daemon
+    state: restarted
+  listen: "restart avahi"
+
+- name: restart journald handler
+  systemd:
+    name: systemd-journald
+    state: restarted
+  listen: "restart journald"
+
+- name: restart libvirtd handler
+  systemd:
+    name: libvirtd
+    state: restarted
+  listen: "restart libvirtd"
+
+- name: restart docker handler
+  systemd:
+    name: docker
+    state: restarted
+  listen: "restart docker"

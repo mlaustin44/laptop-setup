@@ -1,0 +1,181 @@
+---
+# Task 09: User Configuration - Minimal Overrides Only
+
+- name: Install shell and terminal tools
+  pacman:
+    name:
+      - zsh
+      - zsh-completions
+      - zsh-syntax-highlighting
+      - zsh-autosuggestions
+      - bash-completion
+      - fish
+      - starship
+    state: present
+
+- name: Set Zsh as default shell
+  user:
+    name: "{{ target_user }}"
+    shell: /usr/bin/zsh
+
+- name: Create user directories
+  file:
+    path: "/home/{{ target_user }}/{{ item }}"
+    state: directory
+    owner: "{{ target_user }}"
+    group: "{{ target_user }}"
+    mode: '0755'
+  loop:
+    - .local/bin
+    - .config
+    - Pictures/Wallpapers
+
+# Only add environment variables that won't be in the dotfiles
+- name: Add UM5606-specific environment variables to zshrc
+  blockinfile:
+    path: "/home/{{ target_user }}/.zshrc"
+    marker: "# {mark} UM5606 ANSIBLE MANAGED BLOCK"
+    create: yes
+    block: |
+      # Pyenv setup (if not already in dotfiles)
+      if [ -d "$HOME/.pyenv" ]; then
+        export PYENV_ROOT="$HOME/.pyenv"
+        export PATH="$PYENV_ROOT/bin:$PATH"
+        eval "$(pyenv init -)"
+      fi
+      
+      # Go path (if not already set)
+      [ -z "$GOPATH" ] && export GOPATH=$HOME/go
+      [ -d "$GOPATH/bin" ] && export PATH=$PATH:$GOPATH/bin
+      
+      # Rust (if not already sourced)
+      [ -f $HOME/.cargo/env ] && source $HOME/.cargo/env
+      
+      # User scripts
+      export PATH="$HOME/.local/bin:$PATH"
+      
+      # FZF optimizations (if not set)
+      if [ -z "$FZF_DEFAULT_COMMAND" ]; then
+        export FZF_DEFAULT_COMMAND='rg --files --hidden --follow --glob "!.git/*"'
+        export FZF_CTRL_T_COMMAND="$FZF_DEFAULT_COMMAND"
+      fi
+    owner: "{{ target_user }}"
+    group: "{{ target_user }}"
+    mode: '0644'
+
+# Create OLED-specific overrides for terminals (only if needed)
+- name: Create OLED override for Kitty (if it exists)
+  blockinfile:
+    path: "/home/{{ target_user }}/.config/kitty/kitty.conf"
+    marker: "# {mark} OLED OPTIMIZATIONS"
+    block: |
+      # OLED black background override
+      background #000000
+      background_opacity 0.95
+    create: no
+  ignore_errors: yes
+  when: oled_display
+
+- name: Create OLED override for Alacritty (if it exists)
+  blockinfile:
+    path: "/home/{{ target_user }}/.config/alacritty/alacritty.toml"
+    marker: "# {mark} OLED OPTIMIZATIONS"
+    block: |
+      # OLED black background override
+      [colors.primary]
+      background = '#000000'
+      
+      [window]
+      opacity = 0.95
+    create: no
+  ignore_errors: yes
+  when: oled_display
+
+- name: Create OLED override for Foot (if it exists)
+  blockinfile:
+    path: "/home/{{ target_user }}/.config/foot/foot.ini"
+    marker: "# {mark} OLED OPTIMIZATIONS"
+    block: |
+      # OLED black background override
+      [colors]
+      background=000000
+      alpha=0.95
+    create: no
+  ignore_errors: yes
+  when: oled_display
+
+# Configure Git (only if not set by dotfiles)
+- name: Check if git user is configured
+  command: git config --global user.name
+  register: git_user_check
+  ignore_errors: yes
+  changed_when: false
+  become: no
+  become_user: "{{ target_user }}"
+
+- name: Set Git configuration if not already set
+  git_config:
+    name: "{{ item.name }}"
+    value: "{{ item.value }}"
+    scope: global
+  loop:
+    - { name: "user.name", value: "{{ git_user_name }}" }
+    - { name: "user.email", value: "{{ git_user_email }}" }
+    - { name: "core.editor", value: "vim" }
+    - { name: "push.autoSetupRemote", value: "true" }
+  become: no
+  become_user: "{{ target_user }}"
+  when: git_user_check.rc != 0
+
+# Create SSH directory structure
+- name: Create SSH directory
+  file:
+    path: "/home/{{ target_user }}/.ssh"
+    state: directory
+    owner: "{{ target_user }}"
+    group: "{{ target_user }}"
+    mode: '0700'
+
+- name: Create basic SSH config if it doesn't exist
+  copy:
+    content: |
+      # SSH Configuration
+      
+      Host *
+          ServerAliveInterval 60
+          ServerAliveCountMax 3
+          TCPKeepAlive yes
+          Compression yes
+    dest: "/home/{{ target_user }}/.ssh/config"
+    owner: "{{ target_user }}"
+    group: "{{ target_user }}"
+    mode: '0600'
+    force: no  # Don't overwrite if exists
+
+# Install Oh My Zsh only if not present
+- name: Check if Oh My Zsh is installed
+  stat:
+    path: "/home/{{ target_user }}/.oh-my-zsh"
+  register: omz_installed
+
+- name: Install Oh My Zsh if not present
+  shell: |
+    sh -c "$(curl -fsSL https://raw.githubusercontent.com/ohmyzsh/ohmyzsh/master/tools/install.sh)" "" --unattended
+  args:
+    creates: "/home/{{ target_user }}/.oh-my-zsh"
+  become: no
+  become_user: "{{ target_user }}"
+  when: not omz_installed.stat.exists
+
+# Install additional shell tools from AUR
+- name: Install shell enhancement tools from AUR
+  become: no
+  become_user: "{{ target_user }}"
+  command: paru -S --noconfirm --needed {{ item }}
+  loop:
+    - starship-bin
+    - zoxide-bin
+    - atuin  # Better shell history
+  register: shell_tools_install
+  failed_when: false
+  changed_when: "'Nothing to do' not in shell_tools_install.stdout"

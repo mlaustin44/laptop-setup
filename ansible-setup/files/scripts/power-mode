@@ -1,0 +1,81 @@
+#!/bin/bash
+# Power mode management for UM5606
+
+MODES=("powersave" "balanced" "performance" "turbo")
+CURRENT_MODE_FILE="/tmp/power_mode"
+
+get_current_mode() {
+    if [ -f "$CURRENT_MODE_FILE" ]; then
+        cat "$CURRENT_MODE_FILE"
+    else
+        echo "balanced"
+    fi
+}
+
+set_mode() {
+    local mode=$1
+    
+    case $mode in
+        powersave)
+            sudo cpupower frequency-set -g powersave 2>/dev/null || true
+            sudo ryzenadj --tctl-temp=60 --stapm-limit=15000 --fast-limit=15000 --slow-limit=15000 2>/dev/null || true
+            echo "powersave" > $CURRENT_MODE_FILE
+            notify-send "⚡ Power Mode" "Switched to Power Save" -i battery-low
+            ;;
+        balanced)
+            sudo cpupower frequency-set -g schedutil 2>/dev/null || true
+            sudo ryzenadj --tctl-temp=75 --stapm-limit=25000 --fast-limit=35000 --slow-limit=30000 2>/dev/null || true
+            echo "balanced" > $CURRENT_MODE_FILE
+            notify-send "⚡ Power Mode" "Switched to Balanced" -i battery-good
+            ;;
+        performance)
+            sudo cpupower frequency-set -g performance 2>/dev/null || true
+            sudo ryzenadj --tctl-temp=85 --stapm-limit=35000 --fast-limit=45000 --slow-limit=40000 2>/dev/null || true
+            echo "performance" > $CURRENT_MODE_FILE
+            notify-send "⚡ Power Mode" "Switched to Performance" -i battery-full
+            ;;
+        turbo)
+            sudo cpupower frequency-set -g performance 2>/dev/null || true
+            sudo ryzenadj --tctl-temp=95 --stapm-limit=45000 --fast-limit=65000 --slow-limit=54000 2>/dev/null || true
+            echo "turbo" > $CURRENT_MODE_FILE
+            notify-send "⚡ Power Mode" "Switched to Turbo" -i battery-full-charging
+            ;;
+        *)
+            echo "Invalid mode: $mode"
+            exit 1
+            ;;
+    esac
+}
+
+case "$1" in
+    get)
+        get_current_mode
+        ;;
+    set)
+        set_mode "$2"
+        ;;
+    next)
+        current=$(get_current_mode)
+        for i in "${!MODES[@]}"; do
+            if [[ "${MODES[$i]}" = "$current" ]]; then
+                next_index=$(( (i + 1) % ${#MODES[@]} ))
+                set_mode "${MODES[$next_index]}"
+                break
+            fi
+        done
+        ;;
+    prev)
+        current=$(get_current_mode)
+        for i in "${!MODES[@]}"; do
+            if [[ "${MODES[$i]}" = "$current" ]]; then
+                prev_index=$(( (i - 1 + ${#MODES[@]}) % ${#MODES[@]} ))
+                set_mode "${MODES[$prev_index]}"
+                break
+            fi
+        done
+        ;;
+    *)
+        echo "Usage: $0 {get|set|next|prev} [mode]"
+        exit 1
+        ;;
+esac

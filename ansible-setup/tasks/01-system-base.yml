@@ -1,0 +1,127 @@
+---
+# Task 01: Base System Configuration
+
+- name: Configure locale
+  lineinfile:
+    path: /etc/locale.gen
+    regexp: "^#?{{ locale }}"
+    line: "{{ locale }}"
+  notify: regenerate locale
+
+- name: Generate locale
+  command: locale-gen
+  args:
+    creates: /usr/lib/locale/locale-archive
+
+- name: Set system locale
+  copy:
+    content: "LANG={{ locale }}"
+    dest: /etc/locale.conf
+
+- name: Set timezone
+  file:
+    src: "/usr/share/zoneinfo/{{ timezone }}"
+    dest: /etc/localtime
+    state: link
+    force: yes
+
+- name: Set hostname
+  copy:
+    content: "{{ hostname }}"
+    dest: /etc/hostname
+
+- name: Configure hosts file
+  lineinfile:
+    path: /etc/hosts
+    regexp: "^127.0.1.1"
+    line: "127.0.1.1\t{{ hostname }}.localdomain\t{{ hostname }}"
+
+- name: Configure pacman
+  blockinfile:
+    path: /etc/pacman.conf
+    marker: "# {mark} ANSIBLE MANAGED BLOCK"
+    block: |
+      # Misc options
+      Color
+      ParallelDownloads = 5
+      ILoveCandy
+
+- name: Enable multilib repository
+  replace:
+    path: /etc/pacman.conf
+    regexp: '^#\[multilib\]\n#Include = /etc/pacman.d/mirrorlist'
+    replace: '[multilib]\nInclude = /etc/pacman.d/mirrorlist'
+  notify: update pacman cache
+
+# Bootloader configuration removed - should already be working if booted
+# If kernel parameters need updating, do it manually:
+# - For GRUB: Edit /etc/default/grub and run grub-mkconfig
+# - For systemd-boot: Edit /boot/loader/entries/*.conf
+# Required parameters for UM5606: amdgpu.dcdebugmask=0x600
+
+- name: Install essential base packages
+  pacman:
+    name:
+      - base-devel
+      - linux-headers
+      - linux-firmware
+      - intel-ucode
+      - amd-ucode
+      - man-db
+      - man-pages
+      - texinfo
+      - sudo
+      - wget
+      - curl
+      - vim
+      - nano
+      - networkmanager
+      - iwd
+      - dhcpcd
+      - openssh
+      - rsync
+      - htop
+      - git
+    state: present
+
+- name: Configure sudo for wheel group
+  lineinfile:
+    path: /etc/sudoers
+    regexp: '^# %wheel ALL=\(ALL:ALL\) ALL'
+    line: '%wheel ALL=(ALL:ALL) ALL'
+    validate: 'visudo -cf %s'
+
+- name: Create user if not exists
+  user:
+    name: "{{ target_user }}"
+    groups: wheel,users
+    append: yes
+    shell: /bin/bash
+    createhome: yes
+  when: target_user != "root"
+
+- name: Ensure user is in necessary groups
+  user:
+    name: "{{ target_user }}"
+    groups: 
+      - wheel
+      - users
+      - audio
+      - video
+      - optical
+      - storage
+      - scanner
+      - power
+      - input
+    append: yes
+  when: target_user != "root"
+
+# Handlers for this task file
+- name: regenerate locale handler
+  command: locale-gen
+  listen: "regenerate locale"
+
+- name: update pacman cache handler
+  pacman:
+    update_cache: yes
+  listen: "update pacman cache"

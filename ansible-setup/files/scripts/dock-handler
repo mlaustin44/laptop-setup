@@ -1,0 +1,82 @@
+#!/bin/bash
+# Dock handler for Dell U4021QW and Thunderbolt dock
+
+LID_STATE=$(cat /proc/acpi/button/lid/LID0/state 2>/dev/null | awk '{print $2}')
+DELL_AUDIO=$(pactl list sinks short | grep "Dell.*U4021QW" | cut -f2)
+DISPLAYS=$(find /sys/class/drm/*/status -exec grep -l "^connected" {} \; | wc -l)
+
+log_event() {
+  logger "dock-handler: $1 (lid: $LID_STATE, displays: $DISPLAYS)"
+}
+
+case "$1" in
+  connect)
+    log_event "Dock connected"
+    
+    # Wake if lid closed
+    if [ "$LID_STATE" = "closed" ] && [ "$DISPLAYS" -gt 1 ]; then
+      systemctl stop systemd-suspend.service 2>/dev/null
+    fi
+    
+    # Switch audio to Dell speakers
+    sleep 2  # Wait for audio to stabilize
+    
+    # Find Dell audio sink (PipeWire)
+    DELL_SINK=$(pactl list sinks short | grep -i "dell.*u4021qw" | cut -f2 | head -1)
+    if [ -z "$DELL_SINK" ]; then
+      # Try alternative naming
+      DELL_SINK=$(pactl list sinks short | grep -i "displayport\|hdmi" | cut -f2 | head -1)
+    fi
+    
+    if [ -n "$DELL_SINK" ]; then
+      pactl set-default-sink "$DELL_SINK"
+      # Move all playing streams to Dell
+      pactl list sink-inputs short | cut -f1 | while read stream; do
+        pactl move-sink-input "$stream" "$DELL_SINK" 2>/dev/null
+      done
+      notify-send "🔊 Audio" "Switched to Dell U4021QW speakers" -i audio-volume-high
+    fi
+    
+    # Set performance mode when docked
+    ~/.local/bin/power-mode set performance
+    
+    # Switch to docked display profile
+    if pgrep -x sway > /dev/null; then
+      kanshictl switch-to-profile dell-4k-extend
+    fi
+    ;;
+    
+  disconnect)
+    log_event "Dock disconnected"
+    
+    # Switch audio back to laptop
+    LAPTOP_AUDIO=$(pactl list sinks short | grep -E "alsa.*analog-stereo" | head -1 | cut -f2)
+    if [ -n "$LAPTOP_AUDIO" ]; then
+      pactl set-default-sink "$LAPTOP_AUDIO"
+    fi
+    
+    # Set balanced mode on battery
+    ~/.local/bin/power-mode set balanced
+    
+    # Switch to laptop profile
+    if pgrep -x sway > /dev/null; then
+      kanshictl switch-to-profile laptop
+    fi
+    
+    # Suspend if lid closed
+    if [ "$LID_STATE" = "closed" ]; then
+      systemctl suspend-then-hibernate
+    fi
+    ;;
+    
+  display-change)
+    log_event "Display change detected"
+    
+    # Auto-switch display profile
+    if [ "$LID_STATE" = "closed" ] && [ "$DISPLAYS" -gt 1 ]; then
+      systemctl stop systemd-suspend.service 2>/dev/null
+    elif [ "$LID_STATE" = "closed" ] && [ "$DISPLAYS" -eq 1 ]; then
+      systemctl suspend-then-hibernate
+    fi
+    ;;
+esac

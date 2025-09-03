@@ -1,0 +1,41 @@
+#!/bin/bash
+# F7 Display toggle for UM5606
+
+STATE_FILE="/tmp/display_state"
+CURRENT_STATE=$(cat "$STATE_FILE" 2>/dev/null || echo "extend")
+
+# Try kanshi first (works with both Sway and Hyprland)
+if command -v kanshictl &> /dev/null; then
+    PROFILES=$(kanshictl list)
+    
+    if echo "$PROFILES" | grep -q "dell-4k"; then
+        # Dell monitor connected
+        if [ "$CURRENT_STATE" = "extend" ]; then
+            kanshictl switch dell-4k-mirror
+            notify-send "🖥️ Display" "Mirrored (Dell 5K)"
+            echo "mirror" > "$STATE_FILE"
+        else
+            kanshictl switch dell-4k-extend
+            notify-send "🖥️ Display" "Extended (Dell 5K)"
+            echo "extend" > "$STATE_FILE"
+        fi
+    elif echo "$PROFILES" | grep -q "external"; then
+        # Other external display
+        if [ "$CURRENT_STATE" = "extend" ]; then
+            kanshictl switch external-1080p-mirror
+            notify-send "🖥️ Display" "Mirrored"
+            echo "mirror" > "$STATE_FILE"
+        else
+            kanshictl switch external-1080p-extend
+            notify-send "🖥️ Display" "Extended"
+            echo "extend" > "$STATE_FILE"
+        fi
+    else
+        # Laptop only
+        kanshictl switch laptop
+        notify-send "💻 Display" "Laptop Only"
+        echo "laptop" > "$STATE_FILE"
+    fi
+else
+    notify-send "❌ Display Toggle" "Kanshi not found"
+fi

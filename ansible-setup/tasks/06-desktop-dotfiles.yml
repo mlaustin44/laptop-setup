@@ -1,0 +1,435 @@
+---
+# Task 06: Desktop Environment with Premade Dotfiles
+
+- name: Install Xorg base (needed even for Wayland)
+  pacman:
+    name:
+      - xorg-server
+      - xorg-apps
+      - xorg-xinit
+      - xorg-xwayland
+      - xorg-xlsclients
+      - xorg-xrandr
+      - xorg-xdpyinfo
+      - xorg-xprop
+      - xf86-input-libinput
+    state: present
+
+- name: Install GNOME Desktop Environment
+  pacman:
+    name:
+      - gnome
+      - gnome-extra
+      - gnome-tweaks
+      - gnome-shell-extensions
+      - gdm
+      - gnome-themes-extra
+      - adwaita-icon-theme
+      - arc-gtk-theme
+      - papirus-icon-theme
+      - materia-gtk-theme
+    state: present
+  when: primary_desktop == "gnome"
+
+- name: Install Sway and dependencies
+  pacman:
+    name:
+      - sway
+      - swaylock
+      - swayidle
+      - swaybg
+      - waybar
+      - wofi
+      - mako
+      - grim
+      - slurp
+      - wl-clipboard
+      - xdg-desktop-portal-wlr
+      - xdg-desktop-portal-gtk
+      - foot
+      - alacritty
+      - kitty
+      - bemenu
+      - dmenu
+      - i3status-rust
+      - swayimg
+      - imv
+      - kanshi
+      - wlsunset
+      - brightnessctl
+      - playerctl
+      - ranger
+    state: present
+  when: install_sway
+
+# Sway with Luca's dotfiles
+- name: Setup Sway with premade dotfiles
+  block:
+    - name: Clone Luca's Sway dotfiles
+      git:
+        repo: https://github.com/luca-a/dotfiles
+        dest: "/home/{{ target_user }}/dotfiles-sway-base"
+        version: master
+      become: no
+      become_user: "{{ target_user }}"
+
+    - name: Install base Sway dotfiles
+      shell: |
+        # Copy the full dotfiles structure
+        cp -r ~/dotfiles-sway-base/.config/sway ~/.config/
+        cp -r ~/dotfiles-sway-base/.config/waybar ~/.config/
+        cp -r ~/dotfiles-sway-base/.config/wofi ~/.config/
+        cp -r ~/dotfiles-sway-base/.config/mako ~/.config/
+        cp -r ~/dotfiles-sway-base/.config/foot ~/.config/ 2>/dev/null || true
+        cp -r ~/dotfiles-sway-base/.config/ranger ~/.config/ 2>/dev/null || true
+      become: no
+      become_user: "{{ target_user }}"
+      args:
+        creates: "/home/{{ target_user }}/.config/sway/config"
+
+    - name: Create Sway config.d directory
+      file:
+        path: "/home/{{ target_user }}/.config/sway/config.d"
+        state: directory
+        owner: "{{ target_user }}"
+        group: "{{ target_user }}"
+        mode: '0755'
+
+    - name: Create UM5606 specific Sway overrides
+      copy:
+        content: |
+          # Custom overrides for UM5606 - included at end of main config
+          # This preserves the base dotfiles while adding our specific needs
+          
+          # Display switching with F7 (for mirror/extend toggle)
+          bindsym XF86Display exec ~/.local/bin/display-toggle
+          bindsym $mod+F7 exec ~/.local/bin/display-toggle
+          
+          # Power mode controls
+          bindsym $mod+Shift+p exec ~/.local/bin/power-mode-menu
+          bindsym $mod+bracketleft exec ~/.local/bin/power-mode prev
+          bindsym $mod+bracketright exec ~/.local/bin/power-mode next
+          
+          # OLED protection - custom idle config
+          exec swayidle -w \
+            timeout 60 'brightnessctl -s set 10%' \
+              resume 'brightnessctl -r' \
+            timeout 600 'swaymsg "output eDP-1 dpms off"' \
+              resume 'swaymsg "output eDP-1 dpms on"' \
+            timeout 900 'cat /sys/class/power_supply/AC/online | grep -q 0 && systemctl suspend-then-hibernate'
+          
+          # Kanshi for auto display detection
+          exec_always pkill kanshi; exec kanshi
+          
+          # UM5606 specific monitor config
+          output eDP-1 {
+            mode 2880x1800@120Hz
+            scale 1.5
+            bg #000000 solid_color  # Black for OLED
+          }
+          
+          # Dell U4021QW monitor
+          output "Dell Inc. DELL U4021QW GXHTYT3" {
+            mode 5120x2160@60Hz
+            scale 1.25
+            position 0,0
+          }
+          
+          # Wallpaper rotation for OLED
+          exec_always ~/.local/bin/wallpaper-rotate
+        dest: "/home/{{ target_user }}/.config/sway/config.d/um5606-overrides"
+        owner: "{{ target_user }}"
+        group: "{{ target_user }}"
+        mode: '0644'
+
+    - name: Include overrides in main Sway config
+      lineinfile:
+        path: "/home/{{ target_user }}/.config/sway/config"
+        line: "include ~/.config/sway/config.d/*"
+        insertafter: EOF
+  when: install_sway
+
+# Hyprland with JaKooLit's dotfiles
+- name: Setup Hyprland with JaKooLit dotfiles
+  block:
+    - name: Clone JaKooLit Hyprland dotfiles
+      git:
+        repo: https://github.com/JaKooLit/Hyprland-Dots
+        dest: "/home/{{ target_user }}/dotfiles-hyprland-base"
+        version: main
+      become: no
+      become_user: "{{ target_user }}"
+
+    - name: Check if JaKooLit installer exists
+      stat:
+        path: "/home/{{ target_user }}/dotfiles-hyprland-base/install.sh"
+      register: jakoolit_installer
+
+    - name: Run JaKooLit installer script
+      shell: |
+        cd ~/dotfiles-hyprland-base
+        # Automated install with defaults
+        yes | ./install.sh || true
+      become: no
+      become_user: "{{ target_user }}"
+      when: jakoolit_installer.stat.exists
+      args:
+        creates: "/home/{{ target_user }}/.config/hypr/hyprland.conf"
+
+    - name: Manual Hyprland setup if no installer
+      shell: |
+        cp -r ~/dotfiles-hyprland-base/.config/hypr ~/.config/
+        cp -r ~/dotfiles-hyprland-base/.config/waybar ~/.config/waybar-hypr
+        cp -r ~/dotfiles-hyprland-base/.config/wofi ~/.config/
+        cp -r ~/dotfiles-hyprland-base/.config/dunst ~/.config/
+        cp -r ~/dotfiles-hyprland-base/.config/kitty ~/.config/
+      become: no
+      become_user: "{{ target_user }}"
+      when: not jakoolit_installer.stat.exists
+      args:
+        creates: "/home/{{ target_user }}/.config/hypr/hyprland.conf"
+
+    - name: Create UM5606 specific Hyprland config
+      copy:
+        content: |
+          # UM5606 specific configurations
+          # JaKooLit's dotfiles use a modular config approach
+          
+          # Monitor config for OLED
+          monitor = eDP-1, 2880x1800@120, 0x0, 1.5
+          
+          # Dell U4021QW
+          monitor = desc:Dell Inc. DELL U4021QW GXHTYT3, 5120x2160@60, 0x0, 1.25
+          
+          # Display toggle keybind
+          bind = , XF86Display, exec, ~/.local/bin/display-toggle
+          bind = $mainMod, F7, exec, ~/.local/bin/display-toggle
+          
+          # Power modes (in addition to JaKooLit's binds)
+          bind = $mainMod SHIFT, P, exec, ~/.local/bin/power-mode-menu
+          bind = $mainMod, bracketleft, exec, ~/.local/bin/power-mode prev
+          bind = $mainMod, bracketright, exec, ~/.local/bin/power-mode next
+          
+          # OLED burn-in prevention
+          misc {
+            disable_hyprland_logo = true
+            disable_splash_rendering = true
+            vfr = true  # Variable frame rate for power saving
+            no_direct_scanout = true
+          }
+          
+          # Execute kanshi for display management
+          exec-once = kanshi
+          
+          # Wallpaper rotation for OLED
+          exec-once = ~/.local/bin/wallpaper-rotate
+          
+          # OLED idle configuration
+          exec-once = hypridle
+        dest: "/home/{{ target_user }}/.config/hypr/configs/um5606.conf"
+        owner: "{{ target_user }}"
+        group: "{{ target_user }}"
+        mode: '0644'
+
+    - name: Source UM5606 config in main Hyprland config
+      lineinfile:
+        path: "/home/{{ target_user }}/.config/hypr/hyprland.conf"
+        line: "source = ~/.config/hypr/configs/um5606.conf"
+        insertafter: "^source = "
+  when: install_hyprland
+
+# Modify Waybar for power mode display
+- name: Configure Waybar power mode module
+  block:
+    - name: Check if waybar config exists
+      stat:
+        path: "/home/{{ target_user }}/.config/waybar/config"
+      register: waybar_config
+
+    - name: Backup original waybar config
+      copy:
+        src: "/home/{{ target_user }}/.config/waybar/config"
+        dest: "/home/{{ target_user }}/.config/waybar/config.original"
+        remote_src: yes
+        owner: "{{ target_user }}"
+        group: "{{ target_user }}"
+      when: waybar_config.stat.exists
+
+    - name: Add power mode module to waybar
+      shell: |
+        # Check if config is JSON or JSONC
+        if [ -f ~/.config/waybar/config.jsonc ] || [ -f ~/.config/waybar/config ]; then
+          CONFIG_FILE=$(ls ~/.config/waybar/config* | head -1)
+          
+          # Create a power mode module config
+          cat > ~/.config/waybar/modules/power-mode.json << 'EOF'
+        {
+          "custom/powermode": {
+            "exec": "~/.local/bin/power-mode get",
+            "interval": 5,
+            "format": "⚡ {}",
+            "on-click": "~/.local/bin/power-mode-menu",
+            "on-click-right": "~/.local/bin/power-mode-switcher",
+            "on-scroll-up": "~/.local/bin/power-mode next",
+            "on-scroll-down": "~/.local/bin/power-mode prev",
+            "tooltip": true,
+            "tooltip-format": "Power Mode: {}\nClick to change\nScroll to cycle"
+          }
+        }
+        EOF
+        fi
+      become: no
+      become_user: "{{ target_user }}"
+      when: waybar_config.stat.exists
+
+    - name: Add power mode styling to waybar
+      blockinfile:
+        path: "/home/{{ target_user }}/.config/waybar/style.css"
+        marker: "/* {mark} UM5606 POWER MODE STYLES */"
+        block: |
+          #custom-powermode {
+            padding: 0 10px;
+            margin: 0 5px;
+            font-weight: bold;
+          }
+          
+          #custom-powermode.powersave {
+            color: #88c0d0;  /* Blue - power save */
+          }
+          
+          #custom-powermode.balanced {
+            color: #a3be8c;  /* Green - balanced */
+          }
+          
+          #custom-powermode.performance {
+            color: #ebcb8b;  /* Yellow - performance */
+          }
+          
+          #custom-powermode.turbo {
+            color: #bf616a;  /* Red - turbo */
+          }
+        create: yes
+        owner: "{{ target_user }}"
+        group: "{{ target_user }}"
+        mode: '0644'
+  when: install_sway or install_hyprland
+
+# Kanshi display profiles
+- name: Configure Kanshi for automatic display management
+  block:
+    - name: Create kanshi config directory
+      file:
+        path: "/home/{{ target_user }}/.config/kanshi"
+        state: directory
+        owner: "{{ target_user }}"
+        group: "{{ target_user }}"
+        mode: '0755'
+
+    - name: Create kanshi display profiles
+      copy:
+        content: |
+          profile laptop {
+            output eDP-1 mode 2880x1800@120Hz position 0,0 scale 1.5
+          }
+          
+          profile dell-4k-extend {
+            output eDP-1 mode 2880x1800@120Hz position 0,0 scale 1.5
+            output "Dell Inc. DELL U4021QW GXHTYT3" mode 5120x2160@60Hz position 2880,0 scale 1.25
+          }
+          
+          profile dell-4k-mirror {
+            output eDP-1 mode 2880x1800@120Hz position 0,0 scale 1.5
+            output "Dell Inc. DELL U4021QW GXHTYT3" mode 5120x2160@60Hz position 0,0 scale 1.25
+          }
+          
+          profile external-1080p-extend {
+            output eDP-1 mode 2880x1800@120Hz position 0,0 scale 1.5
+            output HDMI-A-1 mode 1920x1080@60Hz position 2880,0 scale 1.0
+          }
+          
+          profile external-1080p-mirror {
+            output eDP-1 mode 2880x1800@120Hz position 0,0 scale 1.5
+            output HDMI-A-1 mode 1920x1080@60Hz position 0,0 scale 1.0
+          }
+          
+          profile docked-closed {
+            output eDP-1 disable
+            output "Dell Inc. DELL U4021QW GXHTYT3" mode 5120x2160@60Hz position 0,0 scale 1.25
+          }
+        dest: "/home/{{ target_user }}/.config/kanshi/config"
+        owner: "{{ target_user }}"
+        group: "{{ target_user }}"
+        mode: '0644'
+  when: install_sway or install_hyprland
+
+# Install additional desktop utilities
+- name: Install desktop utilities
+  pacman:
+    name:
+      - xdg-utils
+      - xdg-user-dirs
+      - desktop-file-utils
+      - shared-mime-info
+      - polkit-gnome
+      - network-manager-applet
+      - blueman
+      - thunar
+      - thunar-volman
+      - thunar-archive-plugin
+      - file-roller
+      - rofi
+      - dunst
+      - picom
+      - nitrogen
+      - lxappearance
+      - qt5ct
+      - qt6ct
+      - kvantum
+    state: present
+
+# Install greetd display manager
+- name: Setup greetd display manager
+  block:
+    - name: Install greetd from AUR
+      become: no
+      become_user: "{{ target_user }}"
+      command: paru -S --noconfirm --needed greetd greetd-tuigreet
+      register: greetd_install
+      failed_when: false
+      changed_when: "'Nothing to do' not in greetd_install.stdout"
+
+    - name: Configure greetd
+      template:
+        src: greetd.conf.j2
+        dest: /etc/greetd/config.toml
+      when: display_manager == "greetd"
+
+    - name: Enable greetd service
+      systemd:
+        name: greetd
+        enabled: yes
+        state: started
+      when: display_manager == "greetd" and not vm_mode
+
+# Create user directories
+- name: Create user directories
+  file:
+    path: "/home/{{ target_user }}/{{ item }}"
+    state: directory
+    owner: "{{ target_user }}"
+    group: "{{ target_user }}"
+    mode: '0755'
+  loop:
+    - Documents
+    - Downloads
+    - Pictures
+    - Pictures/Wallpapers
+    - Videos
+    - Music
+    - Desktop
+    - Public
+    - Templates
+    - .config
+    - .local/bin
+    - .local/share/applications
+    - docker

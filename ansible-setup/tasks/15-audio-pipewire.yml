@@ -1,0 +1,215 @@
+---
+# Task 15: PipeWire Audio Configuration
+
+- name: Install PipeWire and related packages
+  pacman:
+    name:
+      - pipewire
+      - pipewire-pulse
+      - pipewire-alsa
+      - pipewire-jack
+      - wireplumber
+      - pavucontrol
+      - pamixer
+      - playerctl
+      - pulsemixer
+      - easyeffects
+      - realtime-privileges
+    state: present
+
+- name: Add user to audio and realtime groups
+  user:
+    name: "{{ target_user }}"
+    groups:
+      - audio
+      - realtime
+    append: yes
+
+- name: Configure WirePlumber for automatic switching
+  copy:
+    content: |
+      -- WirePlumber configuration for automatic audio switching
+      -- Place in ~/.config/wireplumber/main.lua.d/
+      
+      rule = {
+        matches = {
+          {
+            { "node.name", "matches", "alsa_output.*" },
+          },
+        },
+        apply_properties = {
+          ["node.nick"] = "Laptop Speakers",
+          ["priority.driver"] = 1000,
+          ["priority.session"] = 1000,
+        },
+      }
+      
+      table.insert(alsa_monitor.rules, rule)
+      
+      -- Prioritize Dell U4021QW when connected
+      rule = {
+        matches = {
+          {
+            { "node.name", "matches", "*DELL_U4021QW*" },
+          },
+        },
+        apply_properties = {
+          ["node.nick"] = "Dell U4021QW",
+          ["priority.driver"] = 2000,
+          ["priority.session"] = 2000,
+        },
+      }
+      
+      table.insert(alsa_monitor.rules, rule)
+    dest: "/home/{{ target_user }}/.config/wireplumber/main.lua.d/51-dell-priority.lua"
+    owner: "{{ target_user }}"
+    group: "{{ target_user }}"
+    mode: '0644'
+
+- name: Create audio switching script
+  copy:
+    content: |
+      #!/bin/bash
+      # Audio device switcher
+      
+      # List available sinks
+      echo "🔊 Available Audio Devices:"
+      echo "=========================="
+      pactl list sinks short | nl -v 0
+      echo
+      
+      if [ -n "$1" ]; then
+          # Switch to specified device
+          SINK="$1"
+      else
+          # Interactive selection
+          read -p "Enter device number to switch to: " SINK_NUM
+          SINK=$(pactl list sinks short | sed -n "$((SINK_NUM+1))p" | cut -f2)
+      fi
+      
+      if [ -n "$SINK" ]; then
+          echo "Switching to: $SINK"
+          pactl set-default-sink "$SINK"
+          
+          # Move all playing streams
+          pactl list sink-inputs short | cut -f1 | while read stream; do
+              pactl move-sink-input "$stream" "$SINK" 2>/dev/null
+          done
+          
+          echo "✅ Audio switched successfully"
+      else
+          echo "❌ Invalid selection"
+      fi
+    dest: "/home/{{ target_user }}/.local/bin/audio-switch"
+    owner: "{{ target_user }}"
+    group: "{{ target_user }}"
+    mode: '0755'
+
+- name: Create volume control script
+  copy:
+    content: |
+      #!/bin/bash
+      # Simple volume control wrapper
+      
+      case "$1" in
+          up)
+              pamixer -i "${2:-5}"
+              ;;
+          down)
+              pamixer -d "${2:-5}"
+              ;;
+          mute)
+              pamixer -t
+              ;;
+          get)
+              echo "🔊 Volume: $(pamixer --get-volume)%"
+              pamixer --get-mute && echo "  (Muted)" || echo "  (Unmuted)"
+              ;;
+          *)
+              echo "Usage: $0 {up|down|mute|get} [amount]"
+              echo "  up/down: Change volume by amount (default 5)"
+              echo "  mute: Toggle mute"
+              echo "  get: Show current volume"
+              ;;
+      esac
+      
+      # Show notification
+      if command -v notify-send &>/dev/null; then
+          VOL=$(pamixer --get-volume)
+          if pamixer --get-mute; then
+              notify-send "🔇 Muted" -h int:value:$VOL -h string:synchronous:volume
+          else
+              notify-send "🔊 Volume: $VOL%" -h int:value:$VOL -h string:synchronous:volume
+          fi
+      fi
+    dest: "/home/{{ target_user }}/.local/bin/vol"
+    owner: "{{ target_user }}"
+    group: "{{ target_user }}"
+    mode: '0755'
+
+- name: Enable PipeWire services
+  systemd:
+    name: "{{ item }}"
+    enabled: yes
+    state: started
+    scope: user
+  become: no
+  become_user: "{{ target_user }}"
+  loop:
+    - pipewire
+    - pipewire-pulse
+    - wireplumber
+  when: not vm_mode
+
+- name: Create EasyEffects preset for laptop speakers
+  copy:
+    content: |
+      # EasyEffects preset for laptop speakers
+      # Optimized for ASUS Zenbook UM5606
+      
+      [output]
+      blocklist = []
+      plugins_order = ['bass_enhancer#0', 'compressor#0', 'limiter#0']
+      
+      [output:bass_enhancer#0]
+      amount = 4.0
+      blend = 0.0
+      floor = 20.0
+      floor-active = false
+      harmonics = 8.5
+      input-gain = 0.0
+      output-gain = 0.0
+      scope = 100.0
+      
+      [output:compressor#0]
+      attack = 5.0
+      input-gain = 0.0
+      knee = -6.0
+      makeup = 0.0
+      mode = 'Downward'
+      output-gain = 0.0
+      ratio = 4.0
+      release = 100.0
+      sidechain-input = 'Internal'
+      threshold = -12.0
+      
+      [output:limiter#0]
+      alr = false
+      alr-attack = 5.0
+      alr-knee = 0.0
+      alr-release = 50.0
+      attack = 5.0
+      external-sidechain = false
+      input-gain = 0.0
+      lookahead = 5.0
+      mode = 'Herm Thin'
+      output-gain = 0.0
+      oversampling = 'None'
+      release = 5.0
+      sidechain-preamp = 0.0
+      stereo-link = 100.0
+      threshold = 0.0
+    dest: "/home/{{ target_user }}/.config/easyeffects/output/laptop-speakers.json"
+    owner: "{{ target_user }}"
+    group: "{{ target_user }}"
+    mode: '0644'

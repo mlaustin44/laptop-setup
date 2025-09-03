@@ -1,0 +1,331 @@
+---
+# Task 05: Development Environment Setup
+
+- name: Install Rust toolchain
+  block:
+    - name: Check if Rust is installed
+      command: which rustc
+      register: rust_check
+      ignore_errors: yes
+      changed_when: false
+
+    - name: Download and install Rust
+      shell: |
+        curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain stable
+      args:
+        creates: "/home/{{ target_user }}/.cargo/bin/rustc"
+      become: no
+      become_user: "{{ target_user }}"
+      when: rust_check.rc != 0
+
+    - name: Install Rust components
+      shell: |
+        source $HOME/.cargo/env
+        rustup component add rust-src rust-analyzer clippy rustfmt
+      become: no
+      become_user: "{{ target_user }}"
+      when: install_rust
+
+    - name: Install common Rust tools
+      shell: |
+        source $HOME/.cargo/env
+        cargo install --locked {{ item }}
+      loop:
+        - cargo-watch
+        - cargo-edit
+        - cargo-expand
+        - cargo-outdated
+        - cargo-audit
+        - cargo-bloat
+        - cargo-flamegraph
+        - tokio-console
+        - bacon
+        - sccache
+      become: no
+      become_user: "{{ target_user }}"
+      when: install_rust
+      register: cargo_install
+      failed_when: false
+      changed_when: "'already installed' not in cargo_install.stderr"
+
+- name: Install Go
+  pacman:
+    name: go
+    state: present
+  when: install_go
+
+- name: Setup Go environment
+  blockinfile:
+    path: "/home/{{ target_user }}/.zshrc"
+    marker: "# {mark} ANSIBLE MANAGED BLOCK - GO"
+    block: |
+      export GOPATH=$HOME/go
+      export PATH=$PATH:$GOPATH/bin:/usr/local/go/bin
+    create: yes
+  become: no
+  become_user: "{{ target_user }}"
+  when: install_go
+
+- name: Install Go tools
+  shell: go install {{ item }}
+  loop:
+    - golang.org/x/tools/gopls@latest
+    - github.com/go-delve/delve/cmd/dlv@latest
+    - github.com/golangci/golangci-lint/cmd/golangci-lint@latest
+    - github.com/fatih/gomodifytags@latest
+    - github.com/josharian/impl@latest
+    - github.com/cweill/gotests/gotests@latest
+    - github.com/ramya-rao-a/go-outline@latest
+    - github.com/uudashr/gopkgs/v2/cmd/gopkgs@latest
+    - github.com/rogpeppe/godef@latest
+    - honnef.co/go/tools/cmd/staticcheck@latest
+  become: no
+  become_user: "{{ target_user }}"
+  environment:
+    GOPATH: "/home/{{ target_user }}/go"
+    PATH: "/home/{{ target_user }}/go/bin:/usr/local/go/bin:{{ ansible_env.PATH }}"
+  when: install_go
+  register: go_install
+  failed_when: false
+
+- name: Setup Python with pyenv and uv
+  block:
+    - name: Install pyenv from AUR
+      become: no
+      become_user: "{{ target_user }}"
+      command: paru -S --noconfirm --needed pyenv pyenv-virtualenv
+      register: pyenv_install
+      failed_when: false
+      changed_when: "'Nothing to do' not in pyenv_install.stdout"
+
+    - name: Install pyenv dependencies
+      pacman:
+        name:
+          - base-devel
+          - openssl
+          - zlib
+          - xz
+          - tk
+          - sqlite
+          - bzip2
+          - libffi
+          - readline
+        state: present
+
+    - name: Configure pyenv in shell
+      blockinfile:
+        path: "/home/{{ target_user }}/.zshrc"
+        marker: "# {mark} ANSIBLE MANAGED BLOCK - PYENV"
+        block: |
+          export PYENV_ROOT="$HOME/.pyenv"
+          export PATH="$PYENV_ROOT/bin:$PATH"
+          eval "$(pyenv init -)"
+        create: yes
+      become: no
+      become_user: "{{ target_user }}"
+
+    - name: Install Python 3.11 as default
+      shell: |
+        export PYENV_ROOT="$HOME/.pyenv"
+        export PATH="$PYENV_ROOT/bin:$PATH"
+        eval "$(pyenv init -)"
+        pyenv install -s 3.11
+        pyenv global 3.11
+      become: no
+      become_user: "{{ target_user }}"
+      args:
+        creates: "/home/{{ target_user }}/.pyenv/versions/3.11.*"
+
+    - name: Install uv package manager from AUR
+      become: no
+      become_user: "{{ target_user }}"
+      command: paru -S --noconfirm --needed uv
+      register: uv_install
+      failed_when: false
+      changed_when: "'Nothing to do' not in uv_install.stdout"
+
+- name: Install Python packages via uv
+  shell: |
+    export PYENV_ROOT="$HOME/.pyenv"
+    export PATH="$PYENV_ROOT/bin:$PATH"
+    eval "$(pyenv init -)"
+    
+    uv pip install --system \
+      pip setuptools wheel build virtualenv \
+      pytest pytest-mock pytest-asyncio pytest-django pytest-cov pytest-xdist \
+      'django>=5.1.0' djangorestframework django-cors-headers django-filter \
+      celery redis channels daphne \
+      openai anthropic langchain litellm instructor \
+      numpy pandas matplotlib seaborn scikit-learn scipy statsmodels \
+      plotly bokeh \
+      fastapi flask uvicorn gunicorn \
+      httpx requests aiohttp click pydantic python-dotenv typer rich tqdm \
+      beautifulsoup4 scrapy \
+      temporalio \
+      psycopg2-binary pgvector \
+      sqlalchemy alembic pymongo \
+      ipython jupyter notebook jupyterlab \
+      black isort flake8 mypy pylint bandit pre-commit commitizen ruff \
+      boto3 google-cloud-storage azure-storage-blob \
+      ansible ansible-lint docker docker-compose kubernetes \
+      pyyaml toml tomli faker factory-boy hypothesis locust \
+      mkdocs mkdocs-material sphinx sphinx-rtd-theme \
+      textual questionary
+  become: no
+  become_user: "{{ target_user }}"
+  register: uv_pip_install
+  failed_when: false
+
+- name: Install Node.js packages globally
+  npm:
+    name: "{{ item }}"
+    global: yes
+    state: present
+  loop:
+    # Package managers
+    - npx
+    - yarn
+    - pnpm
+    
+    # Development tools
+    - typescript
+    - ts-node
+    - nodemon
+    - pm2
+    - concurrently
+    
+    # Linting and formatting
+    - eslint
+    - prettier
+    - standard
+    - stylelint
+    
+    # Build tools
+    - webpack
+    - webpack-cli
+    - parcel
+    - vite
+    - rollup
+    
+    # Testing
+    - jest
+    - mocha
+    - chai
+    - puppeteer
+    - playwright
+    
+    # CLI tools
+    - npm-check-updates
+    - npkill
+    - serve
+    - http-server
+    - json-server
+    - localtunnel
+    - ngrok
+    
+    # Documentation
+    - jsdoc
+    - documentation
+    - docusaurus
+    
+    # Other utilities
+    - typescript-language-server
+    - vscode-langservers-extracted
+    - yaml-language-server
+    - dockerfile-language-server-nodejs
+
+- name: Setup Docker
+  block:
+    - name: Install Docker packages
+      pacman:
+        name:
+          - docker
+          - docker-compose
+          - docker-buildx
+          - containerd
+        state: present
+      when: install_docker
+
+    - name: Enable Docker service
+      systemd:
+        name: docker
+        enabled: yes
+        state: started
+      when: install_docker
+
+    - name: Add user to docker group
+      user:
+        name: "{{ target_user }}"
+        groups: docker
+        append: yes
+      when: install_docker
+
+    - name: Configure Docker daemon
+      copy:
+        content: |
+          {
+            "log-driver": "json-file",
+            "log-opts": {
+              "max-size": "10m",
+              "max-file": "3"
+            },
+            "storage-driver": "overlay2",
+            "features": {
+              "buildkit": true
+            },
+            "experimental": true
+          }
+        dest: /etc/docker/daemon.json
+      when: install_docker
+      notify: restart docker
+
+- name: Install container tools
+  pacman:
+    name:
+      - podman
+      - buildah
+      - skopeo
+      - podman-compose
+      - podman-docker
+    state: present
+  when: install_docker
+
+- name: Configure Git
+  block:
+    - name: Set Git user name
+      git_config:
+        name: user.name
+        value: "{{ git_user_name }}"
+        scope: global
+      become: no
+      become_user: "{{ target_user }}"
+
+    - name: Set Git user email
+      git_config:
+        name: user.email
+        value: "{{ git_user_email }}"
+        scope: global
+      become: no
+      become_user: "{{ target_user }}"
+
+    - name: Set Git default configuration
+      git_config:
+        name: "{{ item.name }}"
+        value: "{{ item.value }}"
+        scope: global
+      loop:
+        - { name: "core.editor", value: "vim" }
+        - { name: "push.autoSetupRemote", value: "true" }
+        - { name: "pull.rebase", value: "false" }
+        - { name: "init.defaultBranch", value: "main" }
+        - { name: "color.ui", value: "auto" }
+        - { name: "core.autocrlf", value: "input" }
+      become: no
+      become_user: "{{ target_user }}"
+
+- name: Install Temporal CLI
+  shell: |
+    curl -sSf https://temporal.download/cli.sh | sh
+    sudo mv temporal /usr/local/bin/
+  args:
+    creates: /usr/local/bin/temporal

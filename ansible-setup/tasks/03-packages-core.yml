@@ -1,0 +1,256 @@
+---
+# Task 03: Core Package Installation
+
+- name: Install core system packages
+  pacman:
+    name:
+      # Build tools
+      - base-devel
+      - cmake
+      - clang
+      - gcc
+      - gdb
+      - make
+      - pkg-config
+      - autoconf
+      - automake
+      
+      # Network tools
+      - curl
+      - wget
+      - git
+      - openssh
+      - nmap
+      - traceroute
+      - gnu-netcat
+      - mosh
+      - socat
+      - bind  # for dig/nslookup
+      - whois
+      - net-tools
+      - iftop
+      - nethogs
+      
+      # System utilities
+      - vim
+      - neovim
+      - htop
+      - btop
+      - tree
+      - unzip
+      - p7zip
+      - unrar
+      - jq
+      - fzf
+      - zsh
+      - bash-completion
+      - bc
+      - lsof
+      - screen
+      - tmux
+      - ripgrep
+      - fd
+      - bat
+      - exa
+      - dust
+      - duf
+      - ncdu
+      - hexyl  # hex viewer
+      - xz
+      - moreutils
+      - strace
+      - sysstat
+      - iotop
+      - dstat
+      
+      # File management
+      - rsync
+      - rclone
+      - syncthing
+      - ranger
+      
+      # Development essentials
+      - python
+      - python-pip
+      - python-pipenv
+      - python-virtualenv
+      - nodejs
+      - npm
+      - yarn
+      - jre-openjdk
+      - jdk21-openjdk
+      - android-tools
+      - doxygen
+      - github-cli
+      - tokei  # code statistics
+      
+      # Terminal tools
+      - minicom
+      - picocom
+      - putty
+      - mtr  # better traceroute
+      - httpie
+      - xclip
+      - xsel
+      
+      # Database clients
+      - postgresql-libs
+      - mariadb-clients
+      - redis
+      - sqlite
+      
+      # System monitoring
+      - glances
+      - gotop
+      - bandwhich
+      - procs
+      
+      # Archive tools
+      - zip
+      - tar
+      - gzip
+      - bzip2
+      - lz4
+      - zstd
+    state: present
+
+- name: Install multimedia packages
+  pacman:
+    name:
+      - gimp
+      - inkscape
+      - vlc
+      - mpv
+      - transmission-gtk
+      - ffmpeg
+      - imagemagick
+      - v4l-utils
+      - obs-studio
+      - audacity
+      - kdenlive
+      - flameshot
+      - peek  # screen recorder
+      
+      # Audio system
+      - pipewire
+      - pipewire-pulse
+      - pipewire-alsa
+      - pipewire-jack
+      - wireplumber
+      - pavucontrol
+      - pamixer
+      - playerctl
+      - pulsemixer
+      
+      # Codecs
+      - gst-plugins-base
+      - gst-plugins-good
+      - gst-plugins-bad
+      - gst-plugins-ugly
+      - gst-libav
+      - gstreamer-vaapi
+    state: present
+
+- name: Install system administration tools
+  pacman:
+    name:
+      - wireshark-qt
+      - tcpdump
+      - ngrep
+      - remmina
+      - freerdp
+      - gparted
+      - gnome-disk-utility
+      - ventoy
+      - etcher
+      - testdisk
+      - ddrescue
+      - smartmontools
+      - hdparm
+      - nvme-cli
+    state: present
+
+- name: Install virtualization packages
+  pacman:
+    name:
+      - qemu-full
+      - virt-manager
+      - libvirt
+      - edk2-ovmf  # UEFI firmware
+      - bridge-utils
+      - dnsmasq
+      - vde2
+      - virtualbox
+      - virtualbox-host-modules-arch
+      - wine
+      - wine-gecko
+      - wine-mono
+      - winetricks
+    state: present
+  notify: restart libvirtd
+
+- name: Add user to virtualization groups
+  user:
+    name: "{{ target_user }}"
+    groups:
+      - libvirt
+      - kvm
+      - vboxusers
+    append: yes
+
+- name: Install documentation tools
+  pacman:
+    name:
+      - man-db
+      - man-pages
+      - texinfo
+      - tldr
+      - arch-wiki-docs
+      - arch-wiki-lite
+    state: present
+
+- name: Install fonts
+  pacman:
+    name:
+      - ttf-dejavu
+      - ttf-liberation
+      - ttf-roboto
+      - ttf-roboto-mono
+      - ttf-fira-code
+      - ttf-fira-mono
+      - ttf-hack
+      - ttf-jetbrains-mono
+      - ttf-cascadia-code
+      - noto-fonts
+      - noto-fonts-cjk
+      - noto-fonts-emoji
+      - ttf-font-awesome
+      - powerline-fonts
+      - adobe-source-code-pro-fonts
+    state: present
+
+- name: Install printing support
+  pacman:
+    name:
+      - cups
+      - cups-pdf
+      - ghostscript
+      - gsfonts
+      - gutenprint
+      - foomatic-db
+      - foomatic-db-ppds
+      - foomatic-db-gutenprint-ppds
+      - foomatic-db-nonfree
+      - foomatic-db-nonfree-ppds
+      - hplip
+      - splix
+      - system-config-printer
+    state: present
+  when: not vm_mode
+
+- name: Enable CUPS service
+  systemd:
+    name: cups
+    enabled: yes
+    state: started
+  when: not vm_mode

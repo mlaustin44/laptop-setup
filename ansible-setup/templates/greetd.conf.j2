@@ -1,0 +1,6 @@
+[terminal]
+vt = 1
+
+[default_session]
+command = "tuigreet --time --remember --remember-user-session --asterisks --theme 'border=blue;container=black;text=white' --cmd /usr/bin/{{ 'sway' if install_sway else 'gnome-session' }}"
+user = "greeter"

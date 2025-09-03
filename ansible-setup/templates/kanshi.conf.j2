@@ -1,0 +1,28 @@
+profile laptop {
+    output eDP-1 mode 2880x1800@120Hz position 0,0 scale 1.5
+}
+
+profile dell-4k-extend {
+    output eDP-1 mode 2880x1800@120Hz position 0,0 scale 1.5
+    output "Dell Inc. DELL U4021QW GXHTYT3" mode 5120x2160@60Hz position 2880,0 scale 1.25
+}
+
+profile dell-4k-mirror {
+    output eDP-1 mode 2880x1800@120Hz position 0,0 scale 1.5
+    output "Dell Inc. DELL U4021QW GXHTYT3" mode 5120x2160@60Hz position 0,0 scale 1.25
+}
+
+profile external-1080p-extend {
+    output eDP-1 mode 2880x1800@120Hz position 0,0 scale 1.5
+    output HDMI-A-1 mode 1920x1080@60Hz position 2880,0 scale 1.0
+}
+
+profile external-1080p-mirror {
+    output eDP-1 mode 2880x1800@120Hz position 0,0 scale 1.5
+    output HDMI-A-1 mode 1920x1080@60Hz position 0,0 scale 1.0
+}
+
+profile docked-closed {
+    output eDP-1 disable
+    output "Dell Inc. DELL U4021QW GXHTYT3" mode 5120x2160@60Hz position 0,0 scale 1.25
+}

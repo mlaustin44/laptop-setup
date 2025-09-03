@@ -1,0 +1,164 @@
+---
+user:
+  shell: /usr/bin/zsh
+  
+git:
+  name: "Matthew Austin"
+  editor: vim
+
+versions:
+  node_version: "20"  # LTS
+  go_version: "1.25.0"
+  rust_stable: true
+  python_versions:
+    - "3.11"
+    - "3.12"
+
+# Package Lists
+system_packages:
+  - build-essential
+  - cmake
+  - clang
+  - clang-format
+  - curl
+  - wget
+  - git
+  - vim
+  - htop
+  - tree
+  - unzip
+  - 7zip
+  - jq
+  - fzf
+  - zsh
+  - software-properties-common
+  - apt-transport-https
+  - ca-certificates
+  - gnupg
+  - lsb-release
+  - nmap
+  - bc
+  - lsof
+  - screen
+  - tmux
+  - traceroute
+  - netcat-openbsd
+  - ripgrep
+  - mosh
+  - socat
+  - xxd
+  - xz-utils
+  - wmctrl
+  - upower
+  - openssh-server
+  - gnome-tweaks
+  - postgresql-client
+  - redis-tools
+  - libpq-dev
+
+development_packages:
+  - python3-pip
+  - python3-venv
+  - python3-dev
+  - nodejs
+  - npm
+  - default-jre
+  - default-jdk
+  - openjdk-21-jdk
+  - android-sdk-platform-tools-common
+  - make
+  - g++
+  - gcc
+  - gdb
+  - doxygen
+  - gh
+  - minicom
+  - picocom
+  - putty
+
+additional_packages:
+  - gimp
+  - vlc
+  - transmission
+  - tailscale
+  - ffmpeg
+  - imagemagick
+  - moreutils
+  - wireshark
+  - remmina
+  - sqlite3
+  - virtualbox
+  - wine
+  - gparted
+  - v4l-utils
+
+docker_packages:
+  - docker-ce
+  - docker-ce-cli  
+  - containerd.io
+  - docker-buildx-plugin
+  - docker-compose-plugin
+
+# Flatpak Applications
+flatpak_apps:
+  - app.bluebubbles.BlueBubbles
+  - com.transmissionbt.Transmission
+  - com.ugetdm.uGet
+  - com.usebottles.bottles
+  - hu.irl.cameractrls
+  - io.dbeaver.DBeaverCommunity
+  - net.ankiweb.Anki
+  - org.flameshot.Flameshot
+  - org.telegram.desktop
+  - com.slack.Slack
+  - net.pinta_project.Pinta
+  - org.kicad.KiCad
+  - com.obsproject.Studio
+  - com.github.xournalpp.xournalpp
+  - us.zoom.Zoom
+
+# VSCode Extensions
+vscode_extensions:
+  - anthropic.claude-code
+  - astro-build.astro-vscode
+  - batisteo.vscode-django
+  - docker.docker
+  - editorconfig.editorconfig
+  - golang.go
+  - kahole.magit
+  - mathiasfrohlich.kotlin
+  - ms-azuretools.vscode-containers
+  - ms-azuretools.vscode-docker
+  - ms-python.debugpy
+  - ms-python.python
+  - ms-python.vscode-pylance
+  - ms-python.vscode-python-envs
+  - ms-toolsai.jupyter-keymap
+  - ms-vscode-remote.remote-containers
+  - ms-vscode.cmake-tools
+  - ms-vscode.cpptools
+  - ms-vscode.cpptools-extension-pack
+  - ms-vscode.cpptools-themes
+  - redhat.vscode-yaml
+  - rooveterinaryinc.roo-cline
+  - scala-lang.scala
+  - twxs.cmake
+  - unifiedjs.vscode-mdx
+  - zainchen.json
+  - ziglang.vscode-zig
+
+# oh-my-zsh Configuration
+zsh:
+  theme: robbyrussell
+  plugins:
+    - git
+    - wd
+    - docker
+
+# Desktop Settings
+desktop:
+  clock_format: "24h"
+  keyboard_layouts:
+    - "us"
+    - "us+alt-intl"
+  compose_key: "ralt"

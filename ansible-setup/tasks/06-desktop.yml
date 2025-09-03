@@ -1,0 +1,509 @@
+---
+# Task 06: Desktop Environment Setup
+
+- name: Install Xorg base (needed even for Wayland)
+  pacman:
+    name:
+      - xorg-server
+      - xorg-apps
+      - xorg-xinit
+      - xorg-xwayland
+      - xorg-xlsclients
+      - xorg-xrandr
+      - xorg-xdpyinfo
+      - xorg-xprop
+      - xf86-input-libinput
+    state: present
+
+- name: Install GNOME Desktop Environment
+  pacman:
+    name:
+      - gnome
+      - gnome-extra
+      - gnome-tweaks
+      - gnome-shell-extensions
+      - gdm
+      - gnome-control-center
+      - gnome-terminal
+      - nautilus
+      - gedit
+      - evince
+      - eog
+      - gnome-calculator
+      - gnome-calendar
+      - gnome-weather
+      - gnome-clocks
+      - gnome-screenshot
+      - dconf-editor
+      - gnome-system-monitor
+      - gnome-disk-utility
+      - gnome-backgrounds
+      - gnome-themes-extra
+      - adwaita-icon-theme
+      - arc-gtk-theme
+      - papirus-icon-theme
+      - materia-gtk-theme
+    state: present
+  when: primary_desktop == "gnome"
+
+- name: Install Sway Window Manager
+  pacman:
+    name:
+      - sway
+      - swaylock
+      - swayidle
+      - swaybg
+      - waybar
+      - wofi
+      - mako
+      - grim
+      - slurp
+      - wl-clipboard
+      - xdg-desktop-portal-wlr
+      - xdg-desktop-portal-gtk
+      - foot
+      - alacritty
+      - kitty
+      - bemenu
+      - dmenu
+      - i3status-rust
+      - swayimg
+      - imv
+      - kanshi
+      - wlsunset
+      - brightnessctl
+      - playerctl
+    state: present
+  when: install_sway
+
+- name: Create Sway config directory
+  file:
+    path: "/home/{{ target_user }}/.config/sway"
+    state: directory
+    owner: "{{ target_user }}"
+    group: "{{ target_user }}"
+    mode: '0755'
+  when: install_sway
+
+- name: Configure Sway
+  copy:
+    content: |
+      # Sway Configuration
+      # Mod key (Windows key)
+      set $mod Mod4
+      
+      # Terminal
+      set $term foot
+      
+      # Application launcher
+      set $menu wofi --show drun
+      
+      # Display configuration
+      output eDP-1 {
+          mode 2880x1800@120Hz
+          scale 1.5
+          bg ~/Pictures/wallpaper.jpg fill
+      }
+      
+      # Input configuration
+      input type:touchpad {
+          tap enabled
+          natural_scroll enabled
+          dwt enabled
+          accel_profile adaptive
+          pointer_accel 0.3
+      }
+      
+      input type:keyboard {
+          xkb_layout us
+          repeat_delay 200
+          repeat_rate 30
+      }
+      
+      # Key bindings
+      bindsym $mod+Return exec $term
+      bindsym $mod+d exec $menu
+      bindsym $mod+Shift+q kill
+      bindsym $mod+Shift+c reload
+      bindsym $mod+Shift+e exec swaynag -t warning -m 'Exit Sway?' -B 'Yes' 'swaymsg exit'
+      
+      # Window movement
+      bindsym $mod+h focus left
+      bindsym $mod+j focus down
+      bindsym $mod+k focus up
+      bindsym $mod+l focus right
+      
+      bindsym $mod+Shift+h move left
+      bindsym $mod+Shift+j move down
+      bindsym $mod+Shift+k move up
+      bindsym $mod+Shift+l move right
+      
+      # Workspace switching
+      bindsym $mod+1 workspace 1
+      bindsym $mod+2 workspace 2
+      bindsym $mod+3 workspace 3
+      bindsym $mod+4 workspace 4
+      bindsym $mod+5 workspace 5
+      bindsym $mod+6 workspace 6
+      bindsym $mod+7 workspace 7
+      bindsym $mod+8 workspace 8
+      bindsym $mod+9 workspace 9
+      bindsym $mod+0 workspace 10
+      
+      # Move to workspace
+      bindsym $mod+Shift+1 move container to workspace 1
+      bindsym $mod+Shift+2 move container to workspace 2
+      bindsym $mod+Shift+3 move container to workspace 3
+      bindsym $mod+Shift+4 move container to workspace 4
+      bindsym $mod+Shift+5 move container to workspace 5
+      bindsym $mod+Shift+6 move container to workspace 6
+      bindsym $mod+Shift+7 move container to workspace 7
+      bindsym $mod+Shift+8 move container to workspace 8
+      bindsym $mod+Shift+9 move container to workspace 9
+      bindsym $mod+Shift+0 move container to workspace 10
+      
+      # Layout
+      bindsym $mod+b splith
+      bindsym $mod+v splitv
+      bindsym $mod+s layout stacking
+      bindsym $mod+w layout tabbed
+      bindsym $mod+e layout toggle split
+      bindsym $mod+f fullscreen
+      bindsym $mod+Shift+space floating toggle
+      bindsym $mod+space focus mode_toggle
+      
+      # Screenshots
+      bindsym Print exec grim ~/Pictures/screenshot-$(date +%Y%m%d-%H%M%S).png
+      bindsym Shift+Print exec grim -g "$(slurp)" ~/Pictures/screenshot-$(date +%Y%m%d-%H%M%S).png
+      
+      # Volume control
+      bindsym XF86AudioRaiseVolume exec pamixer -i 5
+      bindsym XF86AudioLowerVolume exec pamixer -d 5
+      bindsym XF86AudioMute exec pamixer -t
+      
+      # Brightness control
+      bindsym XF86MonBrightnessUp exec brightnessctl set 5%+
+      bindsym XF86MonBrightnessDown exec brightnessctl set 5%-
+      
+      # Media controls
+      bindsym XF86AudioPlay exec playerctl play-pause
+      bindsym XF86AudioNext exec playerctl next
+      bindsym XF86AudioPrev exec playerctl previous
+      
+      # Display switching (F7)
+      bindsym XF86Display exec ~/.local/bin/display-toggle
+      bindsym $mod+F7 exec ~/.local/bin/display-toggle
+      
+      # Power mode switching
+      bindsym $mod+Shift+p exec ~/.local/bin/power-mode-menu
+      bindsym $mod+bracketleft exec ~/.local/bin/power-mode prev
+      bindsym $mod+bracketright exec ~/.local/bin/power-mode next
+      
+      # Appearance
+      gaps inner 10
+      gaps outer 5
+      default_border pixel 2
+      default_floating_border pixel 2
+      
+      # Colors
+      client.focused          #4c7899 #285577 #ffffff #2e9ef4 #285577
+      client.focused_inactive #333333 #5f676a #ffffff #484e50 #5f676a
+      client.unfocused        #333333 #222222 #888888 #292d2e #222222
+      client.urgent           #2f343a #900000 #ffffff #900000 #900000
+      
+      # Status bar
+      bar {
+          swaybar_command waybar
+      }
+      
+      # Autostart
+      exec mako
+      exec nm-applet --indicator
+      exec blueman-applet
+      exec /usr/lib/polkit-gnome/polkit-gnome-authentication-agent-1
+      
+      # Idle configuration
+      exec swayidle -w \
+          timeout 300 'swaylock -f' \
+          timeout 600 'swaymsg "output * dpms off"' \
+          resume 'swaymsg "output * dpms on"' \
+          before-sleep 'swaylock -f'
+      
+      # Include additional configs
+      include ~/.config/sway/config.d/*
+    dest: "/home/{{ target_user }}/.config/sway/config"
+    owner: "{{ target_user }}"
+    group: "{{ target_user }}"
+    mode: '0644'
+  when: install_sway
+
+- name: Install Hyprland
+  become: no
+  become_user: "{{ target_user }}"
+  command: paru -S --noconfirm --needed {{ item }}
+  loop:
+    - hyprland-git
+    - hyprlock
+    - hypridle
+    - hyprpaper
+    - hyprpicker
+    - xdg-desktop-portal-hyprland-git
+    - waybar-hyprland-git
+    - rofi-wayland
+    - dunst
+    - wlogout
+  when: install_hyprland
+  register: hyprland_install
+  failed_when: false
+  changed_when: "'Nothing to do' not in hyprland_install.stdout"
+
+- name: Create Hyprland config directory
+  file:
+    path: "/home/{{ target_user }}/.config/hypr"
+    state: directory
+    owner: "{{ target_user }}"
+    group: "{{ target_user }}"
+    mode: '0755'
+  when: install_hyprland
+
+- name: Configure Hyprland
+  copy:
+    content: |
+      # Hyprland Configuration
+      
+      # Monitor configuration
+      monitor=eDP-1,2880x1800@120,0x0,1.5
+      monitor=,preferred,auto,1
+      
+      # Execute at launch
+      exec-once = waybar
+      exec-once = hyprpaper
+      exec-once = dunst
+      exec-once = /usr/lib/polkit-gnome/polkit-gnome-authentication-agent-1
+      exec-once = nm-applet --indicator
+      exec-once = blueman-applet
+      exec-once = hypridle
+      
+      # Environment variables
+      env = XCURSOR_SIZE,24
+      env = QT_QPA_PLATFORMTHEME,qt6ct
+      env = GDK_BACKEND,wayland,x11
+      env = QT_QPA_PLATFORM,wayland;xcb
+      env = CLUTTER_BACKEND,wayland
+      
+      # Input configuration
+      input {
+          kb_layout = us
+          follow_mouse = 1
+          sensitivity = 0
+          
+          touchpad {
+              natural_scroll = yes
+              tap-to-click = yes
+              disable_while_typing = yes
+          }
+      }
+      
+      # General configuration
+      general {
+          gaps_in = 5
+          gaps_out = 10
+          border_size = 2
+          col.active_border = rgba(33ccffee) rgba(00ff99ee) 45deg
+          col.inactive_border = rgba(595959aa)
+          layout = dwindle
+      }
+      
+      # Decoration
+      decoration {
+          rounding = 10
+          blur {
+              enabled = true
+              size = 3
+              passes = 1
+          }
+          drop_shadow = yes
+          shadow_range = 4
+          shadow_render_power = 3
+          col.shadow = rgba(1a1a1aee)
+      }
+      
+      # Animations
+      animations {
+          enabled = yes
+          bezier = myBezier, 0.05, 0.9, 0.1, 1.05
+          animation = windows, 1, 7, myBezier
+          animation = windowsOut, 1, 7, default, popin 80%
+          animation = border, 1, 10, default
+          animation = borderangle, 1, 8, default
+          animation = fade, 1, 7, default
+          animation = workspaces, 1, 6, default
+      }
+      
+      # Layout
+      dwindle {
+          pseudotile = yes
+          preserve_split = yes
+      }
+      
+      master {
+          new_is_master = true
+      }
+      
+      # Window rules
+      windowrule = float, ^(pavucontrol)$
+      windowrule = float, ^(nm-connection-editor)$
+      windowrule = float, ^(blueman-manager)$
+      
+      # Key bindings
+      $mainMod = SUPER
+      
+      bind = $mainMod, Return, exec, kitty
+      bind = $mainMod, Q, killactive
+      bind = $mainMod, M, exit
+      bind = $mainMod, E, exec, nautilus
+      bind = $mainMod, V, togglefloating
+      bind = $mainMod, D, exec, rofi -show drun
+      bind = $mainMod, P, pseudo
+      bind = $mainMod, J, togglesplit
+      bind = $mainMod, F, fullscreen
+      
+      # Move focus
+      bind = $mainMod, h, movefocus, l
+      bind = $mainMod, l, movefocus, r
+      bind = $mainMod, k, movefocus, u
+      bind = $mainMod, j, movefocus, d
+      
+      # Switch workspaces
+      bind = $mainMod, 1, workspace, 1
+      bind = $mainMod, 2, workspace, 2
+      bind = $mainMod, 3, workspace, 3
+      bind = $mainMod, 4, workspace, 4
+      bind = $mainMod, 5, workspace, 5
+      bind = $mainMod, 6, workspace, 6
+      bind = $mainMod, 7, workspace, 7
+      bind = $mainMod, 8, workspace, 8
+      bind = $mainMod, 9, workspace, 9
+      bind = $mainMod, 0, workspace, 10
+      
+      # Move to workspace
+      bind = $mainMod SHIFT, 1, movetoworkspace, 1
+      bind = $mainMod SHIFT, 2, movetoworkspace, 2
+      bind = $mainMod SHIFT, 3, movetoworkspace, 3
+      bind = $mainMod SHIFT, 4, movetoworkspace, 4
+      bind = $mainMod SHIFT, 5, movetoworkspace, 5
+      bind = $mainMod SHIFT, 6, movetoworkspace, 6
+      bind = $mainMod SHIFT, 7, movetoworkspace, 7
+      bind = $mainMod SHIFT, 8, movetoworkspace, 8
+      bind = $mainMod SHIFT, 9, movetoworkspace, 9
+      bind = $mainMod SHIFT, 0, movetoworkspace, 10
+      
+      # Screenshots
+      bind = , Print, exec, grim ~/Pictures/screenshot-$(date +%Y%m%d-%H%M%S).png
+      bind = SHIFT, Print, exec, grim -g "$(slurp)" ~/Pictures/screenshot-$(date +%Y%m%d-%H%M%S).png
+      
+      # Volume control
+      binde = , XF86AudioRaiseVolume, exec, pamixer -i 5
+      binde = , XF86AudioLowerVolume, exec, pamixer -d 5
+      bind = , XF86AudioMute, exec, pamixer -t
+      
+      # Brightness control
+      binde = , XF86MonBrightnessUp, exec, brightnessctl set 5%+
+      binde = , XF86MonBrightnessDown, exec, brightnessctl set 5%-
+      
+      # Media control
+      bind = , XF86AudioPlay, exec, playerctl play-pause
+      bind = , XF86AudioNext, exec, playerctl next
+      bind = , XF86AudioPrev, exec, playerctl previous
+      
+      # Resize mode
+      bind = $mainMod, R, submap, resize
+      submap = resize
+      binde = , l, resizeactive, 10 0
+      binde = , h, resizeactive, -10 0
+      binde = , k, resizeactive, 0 -10
+      binde = , j, resizeactive, 0 10
+      bind = , escape, submap, reset
+      submap = reset
+    dest: "/home/{{ target_user }}/.config/hypr/hyprland.conf"
+    owner: "{{ target_user }}"
+    group: "{{ target_user }}"
+    mode: '0644'
+  when: install_hyprland
+
+- name: Install greetd display manager
+  become: no
+  become_user: "{{ target_user }}"
+  command: paru -S --noconfirm --needed greetd greetd-tuigreet
+  when: display_manager == "greetd"
+  register: greetd_install
+  failed_when: false
+  changed_when: "'Nothing to do' not in greetd_install.stdout"
+
+- name: Configure greetd
+  copy:
+    content: |
+      [terminal]
+      vt = 1
+      
+      [default_session]
+      command = "tuigreet --time --remember --remember-user-session --asterisks --theme 'border=blue;container=black;text=white' --cmd /usr/bin/sway"
+      user = "greeter"
+    dest: /etc/greetd/config.toml
+  when: display_manager == "greetd"
+
+- name: Enable display manager
+  systemd:
+    name: "{{ 'gdm' if primary_desktop == 'gnome' and display_manager != 'greetd' else 'greetd' }}"
+    enabled: yes
+    state: started
+  when: not vm_mode
+
+- name: Install additional desktop utilities
+  pacman:
+    name:
+      - xdg-utils
+      - xdg-user-dirs
+      - desktop-file-utils
+      - shared-mime-info
+      - gtk2
+      - gtk3
+      - gtk4
+      - qt5-base
+      - qt6-base
+      - polkit-gnome
+      - network-manager-applet
+      - blueman
+      - thunar
+      - thunar-volman
+      - thunar-archive-plugin
+      - file-roller
+      - rofi
+      - dunst
+      - picom
+      - nitrogen
+      - lxappearance
+      - qt5ct
+      - qt6ct
+      - kvantum
+    state: present
+
+- name: Create user directories
+  file:
+    path: "/home/{{ target_user }}/{{ item }}"
+    state: directory
+    owner: "{{ target_user }}"
+    group: "{{ target_user }}"
+    mode: '0755'
+  loop:
+    - Documents
+    - Downloads
+    - Pictures
+    - Videos
+    - Music
+    - Desktop
+    - Public
+    - Templates
+    - .config
+    - .local/bin
+    - .local/share/applications
